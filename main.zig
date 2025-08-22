@@ -16,13 +16,31 @@ fn vec3f_norm(vec: vec3f) f32 {
 
 fn vec3f_normalize(vec: vec3f) vec3f {
     const norm = vec3f_norm(vec);
-    return vec / @as(vec3f, @splat(norm));}
+    return vec / @as(vec3f, @splat(norm));
+}
+
+fn vec3f_dot(a: vec3f, b: vec3f) f32 {
+    const c = a * b;
+    return c[0] + c[1] + c[2];
+}
 
 fn ray_color(ray: *const Ray) vec3f {
+    if (hit_sphere(vec3f{0.0, 0.0, -1.0}, 0.5, ray)) {
+        return vec3f{1.0, 0.0, 0.0};
+    }
     const unit_dir = vec3f_normalize(ray.dir);
     const a = 0.5 * (unit_dir[1] + 1.0);
     const a_v = @as(vec3f, @splat(a));
     return @as(vec3f, @splat(1.0 - a)) * @as(vec3f, @splat(1.0)) + a_v*vec3f{0.5, 0.7, 1.0};
+}
+
+fn hit_sphere(center: vec3f, radius: f32, ray: *const Ray) bool {
+    const oc = center - ray.origin;
+    const a = vec3f_dot(ray.dir, ray.dir);
+    const b = -2.0 * vec3f_dot(ray.dir, oc);
+    const c = vec3f_dot(oc, oc) - radius * radius;
+    const disc = b * b - 4.0 * a * c;
+    return disc >= 0;
 }
 
 pub fn main() !void {
