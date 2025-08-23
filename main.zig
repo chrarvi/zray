@@ -1,7 +1,7 @@
 const std = @import("std");
 const stbiw = @import("stb_image_write");
 
-extern fn launch_raycast(img: [*]u8, width: c_int, height: c_int) ?void;
+extern fn launch_raycast(img: [*]u8, cam: *const CameraData) void;
 
 const vec3f = @Vector(3, f32);
 
@@ -114,6 +114,13 @@ const Interval = struct {
     }
 };
 
+// Mirrored in cuda
+const CameraData = extern struct {
+    image_width: u32,
+    image_height: u32,
+    focal_length: f32,
+};
+
 const Camera = struct {
     aspect_ratio: f32,
     image_width: u32,
@@ -151,7 +158,6 @@ const Camera = struct {
         };
     }
 
-
     fn render(self: *const Camera, world: *const World, img: []u8) void {
         for (0..self.image_height) |img_y| {
             for (0..self.image_width) |img_x| {
@@ -168,7 +174,6 @@ const Camera = struct {
                 img[idx + 2] = @intFromFloat(255.0 * @max(@min(1.0, color[2]), 0.0));
             }
         }
-
     }
 
     fn ray_color(ray: *const Ray, world: *const World) vec3f {
@@ -202,7 +207,7 @@ pub fn main() !void {
     var allocator = std.heap.page_allocator;
 
     const aspect_ratio = 16.0 / 9.0;
-    const image_width = 400;
+    const image_width = 600;
     const image_height = @max(@divFloor(image_width, aspect_ratio), 1);
     const img = try allocator.alloc(u8, image_width * image_height * 3);
     defer allocator.free(img);
@@ -220,6 +225,14 @@ pub fn main() !void {
     );
 
     camera.render(&world, img);
+
+    const camera_data = CameraData {
+        .image_width = image_width,
+        .image_height = image_height,
+        .focal_length = 1.0
+    };
+
+    launch_raycast(img.ptr, &camera_data);
 
     if (stbiw.stbi_write_png("output.png", image_width, image_height, 3, img.ptr, image_width * 3) == 0) {
         return error.ImageWriteFailed;
