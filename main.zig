@@ -21,7 +21,7 @@ const Sphere = struct {
     center: vec3f,
     radius: f32,
 
-    fn hit(self: *const Sphere, ray: *const Ray) ?HitRecord {
+    fn hit(self: *const Sphere, ray: *const Ray, ray_tmin: f32, ray_tmax: f32) ?HitRecord {
         const oc = self.center - ray.origin;
         const a = vec3f_dot(ray.dir, ray.dir);
         const h = vec3f_dot(ray.dir, oc);
@@ -34,18 +34,18 @@ const Sphere = struct {
 
         const sqrtd = @sqrt(disc);
         var root = (h - sqrtd) / a;
-        if ((root <= RAY_TMIN) or (RAY_TMAX <= root)) {
+        if ((root <= ray_tmin) or (ray_tmax <= root)) {
             root = (h + sqrtd) / a;
-            if ((root < RAY_TMIN) or (RAY_TMAX <= root)) {
+            if ((root < ray_tmin) or (ray_tmax <= root)) {
                 return null;
             }
         }
 
         const point = ray.at(root);
-        var record = HitRecord {
+        var record = HitRecord{
             .t = root,
             .point = point,
-            .normal = .{0.0, 0.0, 0.0},
+            .normal = .{ 0.0, 0.0, 0.0 },
             .front_face = false,
         };
         const outward_normal = (point - self.center) / @as(vec3f, @splat(self.radius));
@@ -55,8 +55,30 @@ const Sphere = struct {
     }
 };
 
-const RAY_TMIN = 0.0;
-const RAY_TMAX = 1.0;
+const World = struct {
+    objects: std.ArrayList(Sphere),
+
+    fn init(alloc: std.mem.Allocator) World {
+        return World{ .objects = std.ArrayList(Sphere).init(alloc) };
+    }
+
+    fn deinit(self: *World) void {
+        self.objects.deinit();
+    }
+
+    fn hit(self: *const World, ray: *const Ray, ray_tmin: f32, ray_tmax: f32) ?HitRecord {
+        var closest_so_far = ray_tmax;
+        var hit_record: ?HitRecord = null;
+        for (self.objects.items) |*obj| {
+            const temp_rec = obj.hit(ray, ray_tmin, closest_so_far);
+            if (temp_rec != null) {
+                closest_so_far = temp_rec.?.t;
+                hit_record = temp_rec;
+            }
+        }
+        return hit_record;
+    }
+};
 
 const Ray = struct {
     origin: vec3f,
@@ -81,14 +103,11 @@ fn vec3f_dot(a: vec3f, b: vec3f) f32 {
     return c[0] + c[1] + c[2];
 }
 
-fn ray_color(ray: *const Ray, sphere: *const Sphere) vec3f {
-    const hit = sphere.hit(ray);
+fn ray_color(ray: *const Ray, world: *const World) vec3f {
+    const hit = world.hit(ray, 0.0, std.math.floatMax(f32));
 
     if (hit != null) {
-        if (hit.?.t > 0.0) {
-            const hit_normal = vec3f_normalize(ray.at(hit.?.t) - vec3f{ 0.0, 0.0, -1.0 });
-            return @as(vec3f, @splat(0.5)) * (hit_normal + @as(vec3f, @splat(1.0)));
-        }
+        return @as(vec3f, @splat(0.5)) * (hit.?.normal + @as(vec3f, @splat(1.0)));
     }
     const unit_dir = vec3f_normalize(ray.dir);
     const a = 0.5 * (unit_dir[1] + 1.0);
@@ -121,10 +140,16 @@ pub fn main() !void {
     const viewport_upper_left = camera_center - vec3f{ 0.0, 0.0, focal_length } - viewport_u / two - viewport_v / two;
     const pixel00_loc = viewport_upper_left + (pixel_delta_u + pixel_delta_v) / two;
 
-    const sphere = Sphere{
-        .center = vec3f{ 0.0, 0.0, -1.0 },
-        .radius = 0.5,
-    };
+    var world = World.init(allocator);
+    defer world.deinit();
+
+    try world.objects.append(
+        .{ .center = .{ 0.0, 0.0, -1.0 }, .radius = 0.5 },
+    );
+    try world.objects.append(
+        .{ .center = .{ 0.0, -100.5, -1.0 }, .radius = 100.0 },
+    );
+
     for (0..image_height) |img_y| {
         for (0..image_width) |img_x| {
             const x_vf32 = @as(vec3f, @splat(@as(f32, @floatFromInt(img_x))));
@@ -132,7 +157,7 @@ pub fn main() !void {
             const pixel_center = pixel00_loc + (x_vf32 * pixel_delta_u) + (y_vf32 * pixel_delta_v);
             const ray_direction = pixel_center - camera_center;
             const ray = Ray{ .dir = ray_direction, .origin = camera_center };
-            const color = ray_color(&ray, &sphere);
+            const color = ray_color(&ray, &world);
             const idx = 3 * (image_width * img_y + img_x);
 
             img[idx + 0] = @intFromFloat(255.0 * @max(@min(1.0, color[0]), 0.0));
