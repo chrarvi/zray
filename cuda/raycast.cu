@@ -9,18 +9,30 @@
 #define RNG_SEED 1234
 
 typedef struct {
-    float3 center;
-    float radius;
-} Sphere;
-
-typedef struct {
     float3 origin;
     float3 dir;
 } Ray;
 
+
+typedef enum {
+    LAMBERTIAN = 0
+} MaterialKind;
+
+typedef struct {
+    MaterialKind kind;
+    float3 albedo;
+} Material;
+
+typedef struct {
+    float3 center;
+    float radius;
+    Material material;
+} Sphere;
+
 typedef struct {
     float3 point;
     float3 normal;
+    Material material;
     float t;
     bool front_face;
 } HitRecord;
@@ -89,6 +101,11 @@ __device__ float clamp(float v, float mn, float mx) {
     return fmaxf(fminf(v, mx), mn);
 }
 
+__device__ bool near_zero(float3 v) {
+    auto s = 1e-8;
+    return (std::fabs(v.x) < s) && (std::fabs(v.y) < s) && (std::fabs(v.z) < s);
+}
+
 __device__ float3 random_float3_uniform(curandState* local_state, float mn, float mx) {
     float c = mn + (mx - mn);
     float x = c * curand_uniform(local_state);
@@ -149,6 +166,19 @@ __device__ float color_linear_to_gamma(float comp) {
     return 0.0f;
 }
 
+__device__ bool scatter_lambertian(const Ray* ray, const HitRecord* hit_record, curandState* local_state, float3* attenuation, Ray* scattered) {
+    float3 scatter_dir = hit_record->normal + random_unit_vector(local_state);
+    if (near_zero(scatter_dir)) {
+        scatter_dir = hit_record->normal;
+    }
+
+    scattered->dir = scatter_dir;
+    attenuation->x = hit_record->material.albedo.x;
+    attenuation->y = hit_record->material.albedo.y;
+    attenuation->z = hit_record->material.albedo.z;
+    return true;
+}
+
 __device__ bool sphere_hit(const Sphere *sphere, const Ray *ray, float ray_tmin,
                            float ray_tmax, HitRecord *hit_record) {
     const float3 oc = sphere->center - ray->origin;
@@ -191,6 +221,7 @@ __device__ bool spheres_hit(const Ray* ray, const Sphere *spheres, unsigned int 
             hit = true;
             closest_so_far = temp_hit.t;
             hit_record->t = temp_hit.t;
+            hit_record->material = sphere->material;
             hit_record->normal = temp_hit.normal;
             hit_record->point = temp_hit.point;
             hit_record->front_face = temp_hit.front_face;
@@ -223,11 +254,12 @@ __device__ float3 ray_color(const Ray& ray, int max_depth, const Sphere* spheres
     for (int depth = 0; depth < max_depth; ++depth) {
         HitRecord hit_record;
         if (spheres_hit(&current_ray, spheres, spheres_count, 0.001f, INFINITY, &hit_record)) {
-            // lambertian
-            float3 dir = hit_record.normal + random_unit_vector(local_state);
+            switch (hit_record.material.kind) {
+            case LAMBERTIAN:
+                scatter_lambertian(&current_ray, &hit_record, local_state, &attenuation, &current_ray);
+                break;
+            }
             current_ray.origin = hit_record.point + 1e-4f * hit_record.normal;
-            current_ray.dir = dir;
-            attenuation = attenuation * 0.5f;
         } else {
             const float3 unit_dir = normalize(current_ray.dir);
             float t = 0.5f * (unit_dir.y + 1.0f);
@@ -287,9 +319,10 @@ extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
 
     setup_rng<<<grid, block>>>(d_rng_state, cam->image_width, cam->image_height);
 
+    Material lambertian_mat = {.kind = LAMBERTIAN, .albedo = make_float3(0.5f, 0.5f, 0.5f)};
     Sphere spheres[] = {
-        {.center = {0.0f, 0.0f, -1.0f}, .radius = 0.5f},
-        {.center = {0.0f, -100.5f, -1.0f}, .radius = 100.0f}
+        {.center = {0.0f, 0.0f, -1.0f}, .radius = 0.5f, .material = {.kind = LAMBERTIAN, .albedo = make_float3(0.5f, 0.5f, 0.5f)}},
+        {.center = {0.0f, -100.5f, -1.0f}, .radius = 100.0f, .material = {.kind = LAMBERTIAN, .albedo = make_float3(0.1f, 0.1f, 0.1f)}}
     };
     size_t spheres_count = sizeof(spheres) / sizeof(spheres[0]);
 
