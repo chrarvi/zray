@@ -15,7 +15,8 @@ typedef struct {
 
 
 typedef enum {
-    LAMBERTIAN = 0
+    LAMBERTIAN = 0,
+    METAL = 1
 } MaterialKind;
 
 typedef struct {
@@ -140,6 +141,10 @@ __device__ float3 random_on_hemisphere(curandState* local_state, const float3 no
     }
 }
 
+__device__ float3 reflect(float3 v, float3 n) {
+    return v - 2.0f * dot(v, n) * n;
+}
+
 __global__ void setup_rng(curandState* state, int width, int height) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -173,9 +178,18 @@ __device__ bool scatter_lambertian(const Ray* ray, const HitRecord* hit_record, 
     }
 
     scattered->dir = scatter_dir;
-    attenuation->x = hit_record->material.albedo.x;
-    attenuation->y = hit_record->material.albedo.y;
-    attenuation->z = hit_record->material.albedo.z;
+    attenuation->x = attenuation->x * hit_record->material.albedo.x;
+    attenuation->y = attenuation->y * hit_record->material.albedo.y;
+    attenuation->z = attenuation->z * hit_record->material.albedo.z;
+    return true;
+}
+
+__device__ bool scatter_metal(const Ray* ray, const HitRecord* hit_record, curandState* local_state, float3* attenuation, Ray* scattered) {
+    float3 reflected = reflect(ray->dir, hit_record->normal);
+    scattered->dir = reflected;
+    attenuation->x = attenuation->x * hit_record->material.albedo.x;
+    attenuation->y = attenuation->y * hit_record->material.albedo.y;
+    attenuation->z = attenuation->z * hit_record->material.albedo.z;
     return true;
 }
 
@@ -254,12 +268,23 @@ __device__ float3 ray_color(const Ray& ray, int max_depth, const Sphere* spheres
     for (int depth = 0; depth < max_depth; ++depth) {
         HitRecord hit_record;
         if (spheres_hit(&current_ray, spheres, spheres_count, 0.001f, INFINITY, &hit_record)) {
+            bool scattered = false;
+            Ray temp_ray = {current_ray.origin, current_ray.dir};
             switch (hit_record.material.kind) {
             case LAMBERTIAN:
-                scatter_lambertian(&current_ray, &hit_record, local_state, &attenuation, &current_ray);
+                scattered = scatter_lambertian(&current_ray, &hit_record, local_state, &attenuation, &temp_ray);
+                break;
+            case METAL:
+                scattered = scatter_metal(&current_ray, &hit_record, local_state, &attenuation, &temp_ray);
                 break;
             }
-            current_ray.origin = hit_record.point + 1e-4f * hit_record.normal;
+            if (scattered) {
+                current_ray.origin = hit_record.point + 1e-4f * hit_record.normal;
+                current_ray.dir = temp_ray.dir;
+            } else {
+                color = make_float3(0.0f, 0.0f, 0.0f);
+                break;
+            }
         } else {
             const float3 unit_dir = normalize(current_ray.dir);
             float t = 0.5f * (unit_dir.y + 1.0f);
@@ -319,10 +344,13 @@ extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
 
     setup_rng<<<grid, block>>>(d_rng_state, cam->image_width, cam->image_height);
 
-    Material lambertian_mat = {.kind = LAMBERTIAN, .albedo = make_float3(0.5f, 0.5f, 0.5f)};
+    Material lambertian_mat = {.kind = LAMBERTIAN, .albedo = make_float3(0.1f, 0.2f, 0.5f)};
+    Material metal_mat = {.kind = METAL, .albedo = make_float3(0.8f, 0.8f, 0.8f)};
+    Material ground_mat = {.kind = LAMBERTIAN, .albedo = make_float3(0.8f, 0.8f, 0.8f)};
     Sphere spheres[] = {
-        {.center = {0.0f, 0.0f, -1.0f}, .radius = 0.5f, .material = {.kind = LAMBERTIAN, .albedo = make_float3(0.5f, 0.5f, 0.5f)}},
-        {.center = {0.0f, -100.5f, -1.0f}, .radius = 100.0f, .material = {.kind = LAMBERTIAN, .albedo = make_float3(0.1f, 0.1f, 0.1f)}}
+        {.center = {-0.5f, -0.15f, -1.0f}, .radius = 0.3f, .material = lambertian_mat},
+        {.center = {0.5f, 0.0f, -1.0f}, .radius = 0.5f, .material = metal_mat},
+        {.center = {0.0f, -100.5f, -1.0f}, .radius = 100.0f, .material = ground_mat}
     };
     size_t spheres_count = sizeof(spheres) / sizeof(spheres[0]);
 
