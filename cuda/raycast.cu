@@ -1,5 +1,6 @@
 #include <cmath>
 #include <cuda_runtime.h>
+#include <ios>
 #include <math.h>
 
 #include <curand.h>
@@ -55,7 +56,7 @@ __device__ float dot(float3 a, float3 b) {
     return a.x*b.x + a.y* b.y + a.z*b.z;
 }
 
-__device__ float clamp(float v, float mn, float mx) {
+__host__ __device__ float clamp(float v, float mn, float mx) {
     return fmaxf(fminf(v, mx), mn);
 }
 
@@ -90,6 +91,7 @@ typedef struct {
     unsigned int image_width;
     unsigned int image_height;
     float focal_length;
+    unsigned int samples_per_pixel;
 } CameraData;
 
 __device__ bool range_constains(float v, float min, float max) {
@@ -155,6 +157,21 @@ __device__ bool spheres_hit(const Ray* ray, const Sphere *spheres, unsigned int 
     return hit;
 }
 
+__device__ float3 sample_square(curandState *local_state) {
+    float x = curand_uniform(local_state) - 0.5f;
+    float y = curand_uniform(local_state) - 0.5f;
+    float z = 0.0f;
+    return make_float3(x, y, z);
+}
+
+__device__ Ray sample_ray(curandState *local_state, unsigned int img_x, unsigned int img_y, float3 pixel00_loc, float3 pixel_delta_u, float3 pixel_delta_v, float3 ray_origin) {
+    const float3 offset = sample_square(local_state);
+    const float3 pixel_sample = pixel00_loc + ((img_x + offset.x) * pixel_delta_u) + ((img_y + offset.y) * pixel_delta_v);
+
+    const float3 ray_direction = pixel_sample - ray_origin;
+    return Ray{.origin = ray_origin, .dir = ray_direction};
+}
+
 __device__ float3 ray_color(const Ray* ray, const Sphere* spheres, unsigned int spheres_count) {
     HitRecord hit_record = {0};
     bool hit = spheres_hit(ray, spheres, spheres_count, 0.0f, INFINITY, &hit_record);
@@ -167,7 +184,7 @@ __device__ float3 ray_color(const Ray* ray, const Sphere* spheres, unsigned int 
     return (1.0f - a) + (a * make_float3(0.5, 0.7, 1.0));
 }
 
-__global__ void render_kernel(unsigned char* img, const CameraData* cam, const Sphere* spheres, unsigned int spheres_count) {
+__global__ void render_kernel(unsigned char* img, const CameraData* cam, const Sphere* spheres, unsigned int spheres_count, curandState* rng_state) {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= cam->image_width || y >= cam->image_height) return;
@@ -181,15 +198,20 @@ __global__ void render_kernel(unsigned char* img, const CameraData* cam, const S
     const float3 pixel_delta_v = viewport_v / (float)cam->image_height;
     const float3 viewport_upper_left = camera_center - make_float3(0.0f, 0.0f, cam->focal_length) - viewport_u / 2.0f - viewport_v / 2.0f;
     const float3 pixel00_loc = viewport_upper_left + (pixel_delta_u + pixel_delta_v) / 2.0f;
-    const float3 pixel_center = pixel00_loc + (x * pixel_delta_u) + (y * pixel_delta_v);
-    const float3 ray_direction = pixel_center - camera_center;
 
-    const Ray ray = {.origin = camera_center, .dir = ray_direction};
-    const float3 color = ray_color(&ray, spheres, spheres_count);
+    curandState* local_state = &rng_state[y * cam->image_width + x];
+    float3 color = make_float3(0.0f, 0.0f, 0.0f);
+    for (size_t sample = 0u; sample < cam->samples_per_pixel; ++sample) {
+        const Ray ray = sample_ray(local_state, x, y, pixel00_loc, pixel_delta_u, pixel_delta_v, camera_center);
+        color = color + ray_color(&ray, spheres, spheres_count);
+    }
+
+    color = color / (float)cam->samples_per_pixel;
+
     int idx = 3 * (y * cam->image_width + x);
-    img[idx+0] = (unsigned char)(255.0f * fminf(fmaxf(color.x, 0.0f), 1.0f));
-    img[idx+1] = (unsigned char)(255.0f * fminf(fmaxf(color.y, 0.0f), 1.0f));
-    img[idx+2] = (unsigned char)(255.0f * fminf(fmaxf(color.z, 0.0f), 1.0f));
+    img[idx+0] = (unsigned char)(255.0f * clamp(color.x, 0.0f, 0.999f));
+    img[idx+1] = (unsigned char)(255.0f * clamp(color.y, 0.0f, 0.999f));
+    img[idx+2] = (unsigned char)(255.0f * clamp(color.z, 0.0f, 0.999f));
 }
 
 __global__ void noise_kernel(unsigned char* img, const CameraData* cam, curandState* rng_state) {
@@ -237,9 +259,12 @@ extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
 
     float3 cam_center = make_float3(0.0f, 0.0f, 0.0f);
 
-    render_kernel<<<grid, block>>>(d_img, cam, spheres, spheres_count);
-    noise_kernel<<<grid, block>>>(d_img, cam, d_rng_state);
+    render_kernel<<<grid, block>>>(d_img, cam, spheres, spheres_count, d_rng_state);
+    // noise_kernel<<<grid, block>>>(d_img, cam, d_rng_state);
 
     cudaMemcpy(img, d_img, img_size, cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
+
+    cudaFree(d_img);
+    cudaFree(d_rng_state);
 }
