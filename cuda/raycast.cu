@@ -1,6 +1,5 @@
 #include <cmath>
 #include <cuda_runtime.h>
-#include <ios>
 #include <math.h>
 
 #include <curand.h>
@@ -22,6 +21,7 @@ typedef enum {
 typedef struct {
     MaterialKind kind;
     float3 albedo;
+    float fuzz;
 } Material;
 
 typedef struct {
@@ -186,11 +186,12 @@ __device__ bool scatter_lambertian(const Ray* ray, const HitRecord* hit_record, 
 
 __device__ bool scatter_metal(const Ray* ray, const HitRecord* hit_record, curandState* local_state, float3* attenuation, Ray* scattered) {
     float3 reflected = reflect(ray->dir, hit_record->normal);
+    reflected = normalize(reflected) + (hit_record->material.fuzz * random_unit_vector(local_state));
     scattered->dir = reflected;
     attenuation->x = attenuation->x * hit_record->material.albedo.x;
     attenuation->y = attenuation->y * hit_record->material.albedo.y;
     attenuation->z = attenuation->z * hit_record->material.albedo.z;
-    return true;
+    return dot(scattered->dir, hit_record->normal) > 0.0f;
 }
 
 __device__ bool sphere_hit(const Sphere *sphere, const Ray *ray, float ray_tmin,
@@ -346,11 +347,13 @@ extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
     setup_rng<<<grid, block>>>(d_rng_state, cam->image_width, cam->image_height);
 
     Material lambertian_mat = {.kind = LAMBERTIAN, .albedo = make_float3(0.1f, 0.2f, 0.5f)};
-    Material metal_mat = {.kind = METAL, .albedo = make_float3(0.8f, 0.8f, 0.8f)};
+    Material metal_mat = {.kind = METAL, .albedo = make_float3(0.8f, 0.8f, 0.8f), .fuzz = 0.05f};
+    Material metal_mat2 = {.kind = METAL, .albedo = make_float3(0.8f, 0.6f, 0.3f), .fuzz = 0.0f};
     Material ground_mat = {.kind = LAMBERTIAN, .albedo = make_float3(0.8f, 0.8f, 0.8f)};
     Sphere spheres[] = {
-        {.center = {-0.5f, -0.15f, -1.0f}, .radius = 0.3f, .material = lambertian_mat},
-        {.center = {0.5f, 0.0f, -1.0f}, .radius = 0.5f, .material = metal_mat},
+        {.center = {-0.8f, -0.15f, -0.8f}, .radius = 0.3f, .material = lambertian_mat},
+        {.center = {0.0f, 0.0f, -1.2f}, .radius = 0.5f, .material = metal_mat},
+        {.center = {0.8f, -0.15f, -0.8f}, .radius = 0.3f, .material = metal_mat2},
         {.center = {0.0f, -100.5f, -1.0f}, .radius = 100.0f, .material = ground_mat}
     };
     size_t spheres_count = sizeof(spheres) / sizeof(spheres[0]);
