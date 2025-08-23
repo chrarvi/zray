@@ -212,19 +212,19 @@ pub fn main() !void {
     const img = try allocator.alloc(u8, image_width * image_height * 3);
     defer allocator.free(img);
 
-    const camera = Camera.init(aspect_ratio, image_width, image_height, .{ 0.0, 0.0, 0.0 });
+    // const camera = Camera.init(aspect_ratio, image_width, image_height, .{ 0.0, 0.0, 0.0 });
 
-    var world = World.init(allocator);
-    defer world.deinit();
+    // var world = World.init(allocator);
+    // defer world.deinit();
 
-    try world.objects.append(
-        .{ .center = .{ 0.0, 0.0, -1.0 }, .radius = 0.5 },
-    );
-    try world.objects.append(
-        .{ .center = .{ 0.0, -100.5, -1.0 }, .radius = 100.0 },
-    );
+    // try world.objects.append(
+    //     .{ .center = .{ 0.0, 0.0, -1.0 }, .radius = 0.5 },
+    // );
+    // try world.objects.append(
+    //     .{ .center = .{ 0.0, -100.5, -1.0 }, .radius = 100.0 },
+    // );
 
-    camera.render(&world, img);
+    // camera.render(&world, img);
 
     const camera_data = CameraData {
         .image_width = image_width,

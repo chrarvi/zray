@@ -2,6 +2,11 @@
 #include <cuda_runtime.h>
 #include <math.h>
 
+#include <curand.h>
+#include <curand_kernel.h>
+
+#define RNG_SEED 1234
+
 __device__ float norm(float3 v) {
     return norm3df(v.x, v.y, v.z);
 }
@@ -52,6 +57,15 @@ __device__ float dot(float3 a, float3 b) {
 
 __device__ float clamp(float v, float mn, float mx) {
     return fmaxf(fminf(v, mx), mn);
+}
+
+__global__ void setup_rng(curandState* state, int width, int height) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= width || y >= height) return;
+
+    int idx = y * width + x;
+    curand_init(RNG_SEED, idx, 0, &state[idx]);
 }
 
 typedef struct {
@@ -178,11 +192,42 @@ __global__ void render_kernel(unsigned char* img, const CameraData* cam, const S
     img[idx+2] = (unsigned char)(255.0f * fminf(fmaxf(color.z, 0.0f), 1.0f));
 }
 
+__global__ void noise_kernel(unsigned char* img, const CameraData* cam, curandState* rng_state) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= cam->image_width || y >= cam->image_height) return;
+
+    int idx = y * cam->image_width + x;
+    curandState local_state = rng_state[idx];
+
+    float r = curand_uniform(&local_state);
+    float g = curand_uniform(&local_state);
+    float b = curand_uniform(&local_state);
+
+    rng_state[idx] = local_state;
+
+    int pixel_idx = 3 * idx;
+    img[pixel_idx + 0] = (unsigned char)(255.0f * r);
+    img[pixel_idx + 1] = (unsigned char)(255.0f * g);
+    img[pixel_idx + 2] = (unsigned char)(255.0f * b);
+}
+
+
 
 extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
+    unsigned char *d_img;
+    size_t img_size = cam->image_height * cam->image_width * 3U * sizeof(unsigned char);
+    cudaMalloc((void**)&d_img, img_size);
+    cudaMemcpy(d_img, img, img_size, cudaMemcpyHostToDevice);
+
+    curandState *d_rng_state;
+    cudaMalloc(&d_rng_state, cam->image_height * cam->image_width * sizeof(curandState));
+
     dim3 block(16, 16);
     dim3 grid((cam->image_width + block.x - 1) / block.x,
                 (cam->image_height + block.y - 1) / block.y);
+
+    setup_rng<<<grid, block>>>(d_rng_state, cam->image_width, cam->image_height);
 
     Sphere spheres[] = {
         {.center = {0.0f, 0.0f, -1.0f}, .radius = 0.5f},
@@ -192,6 +237,9 @@ extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
 
     float3 cam_center = make_float3(0.0f, 0.0f, 0.0f);
 
-    render_kernel<<<grid, block>>>(img, cam, spheres, spheres_count);
+    render_kernel<<<grid, block>>>(d_img, cam, spheres, spheres_count);
+    noise_kernel<<<grid, block>>>(d_img, cam, d_rng_state);
+
+    cudaMemcpy(img, d_img, img_size, cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
 }
