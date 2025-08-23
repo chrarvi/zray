@@ -8,6 +8,32 @@
 
 #define RNG_SEED 1234
 
+typedef struct {
+    float3 center;
+    float radius;
+} Sphere;
+
+typedef struct {
+    float3 origin;
+    float3 dir;
+} Ray;
+
+typedef struct {
+    float3 point;
+    float3 normal;
+    float t;
+    bool front_face;
+} HitRecord;
+
+// Mirrored in zig
+typedef struct {
+    unsigned int image_width;
+    unsigned int image_height;
+    float focal_length;
+    unsigned int samples_per_pixel;
+    int max_depth;
+} CameraData;
+
 __device__ float norm(float3 v) {
     return norm3df(v.x, v.y, v.z);
 }
@@ -38,6 +64,9 @@ __device__ float3 operator+(float a, float3 b) {
 __device__ float3 operator*(float3 v, float c) {
     return make_float3(v.x * c, v.y * c, v.z * c);
 }
+__device__ float3 operator*(float3 a, float3 b) {
+    return make_float3(a.x * b.x, a.y * b.y, a.z * b.z);
+}
 
 __device__ float3 operator/(float3 v, float c) {
     const float r = 1/c;
@@ -56,8 +85,42 @@ __device__ float dot(float3 a, float3 b) {
     return a.x*b.x + a.y* b.y + a.z*b.z;
 }
 
-__host__ __device__ float clamp(float v, float mn, float mx) {
+__device__ float clamp(float v, float mn, float mx) {
     return fmaxf(fminf(v, mx), mn);
+}
+
+__device__ float3 random_float3_uniform(curandState* local_state, float mn, float mx) {
+    float c = mn + (mx - mn);
+    float x = c * curand_uniform(local_state);
+    float y = c * curand_uniform(local_state);
+    float z = c * curand_uniform(local_state);
+
+    return make_float3(x, y, z);
+}
+
+
+#define PI 3.14159265358979323846f
+__device__ float3 random_unit_vector(curandState* local_state) {
+    // pretty expensive but it's better than rejection sampling
+    float u = curand_uniform(local_state);
+    float theta = 2.0f * PI * curand_uniform(local_state);
+
+    float z = 1.0f - 2.0f * u;
+    float r = sqrtf(1.0f - z * z);
+
+    float x = r * cosf(theta);
+    float y = r * sinf(theta);
+
+    return make_float3(x, y, z);
+}
+
+__device__ float3 random_on_hemisphere(curandState* local_state, const float3 normal) {
+    float3 on_unit_sphere = random_unit_vector(local_state);
+    if (dot(on_unit_sphere, normal) > 0.0) {
+        return on_unit_sphere;
+    } else {
+        return -1.0 * on_unit_sphere;
+    }
 }
 
 __global__ void setup_rng(curandState* state, int width, int height) {
@@ -68,31 +131,6 @@ __global__ void setup_rng(curandState* state, int width, int height) {
     int idx = y * width + x;
     curand_init(RNG_SEED, idx, 0, &state[idx]);
 }
-
-typedef struct {
-    float3 center;
-    float radius;
-} Sphere;
-
-typedef struct {
-    float3 origin;
-    float3 dir;
-} Ray;
-
-typedef struct {
-    float3 point;
-    float3 normal;
-    float t;
-    bool front_face;
-} HitRecord;
-
-// Mirrored in zig
-typedef struct {
-    unsigned int image_width;
-    unsigned int image_height;
-    float focal_length;
-    unsigned int samples_per_pixel;
-} CameraData;
 
 __device__ bool range_constains(float v, float min, float max) {
     return min <= v && v <= max;
@@ -172,16 +210,26 @@ __device__ Ray sample_ray(curandState *local_state, unsigned int img_x, unsigned
     return Ray{.origin = ray_origin, .dir = ray_direction};
 }
 
-__device__ float3 ray_color(const Ray* ray, const Sphere* spheres, unsigned int spheres_count) {
-    HitRecord hit_record = {0};
-    bool hit = spheres_hit(ray, spheres, spheres_count, 0.0f, INFINITY, &hit_record);
-    if (hit) {
-        return 0.5 * (hit_record.normal + 1.0f);
-    }
+__device__ float3 ray_color(const Ray& ray, int max_depth, const Sphere* spheres, unsigned int spheres_count, curandState* state) {
+    Ray current_ray = ray;
+    float3 attenuation = make_float3(1.0f, 1.0f, 1.0f);
+    float3 color = make_float3(0.0f, 0.0f, 0.0f);
 
-    const float3 unit_dir = normalize(ray->dir);
-    const float a = 0.5 * (unit_dir.y + 1.0);
-    return (1.0f - a) + (a * make_float3(0.5, 0.7, 1.0));
+    for (int depth = 0; depth < max_depth; ++depth) {
+        HitRecord hit_record;
+        if (spheres_hit(&current_ray, spheres, spheres_count, 0.001f, INFINITY, &hit_record)) {
+            float3 dir = random_on_hemisphere(state, hit_record.normal);
+            current_ray.origin = hit_record.point + 1e-4f * hit_record.normal;
+            current_ray.dir = dir;
+            attenuation = attenuation * 0.5f;
+        } else {
+            const float3 unit_dir = normalize(current_ray.dir);
+            float t = 0.5f * (unit_dir.y + 1.0f);
+            color = color + ((1.0f - t) * make_float3(1.0f, 1.0f, 1.0f) + t * make_float3(0.5f, 0.7f, 1.0f)) * attenuation;
+            break;
+        }
+    }
+    return color;
 }
 
 __global__ void render_kernel(unsigned char* img, const CameraData* cam, const Sphere* spheres, unsigned int spheres_count, curandState* rng_state) {
@@ -203,7 +251,7 @@ __global__ void render_kernel(unsigned char* img, const CameraData* cam, const S
     float3 color = make_float3(0.0f, 0.0f, 0.0f);
     for (size_t sample = 0u; sample < cam->samples_per_pixel; ++sample) {
         const Ray ray = sample_ray(local_state, x, y, pixel00_loc, pixel_delta_u, pixel_delta_v, camera_center);
-        color = color + ray_color(&ray, spheres, spheres_count);
+        color = color + ray_color(ray, cam->max_depth, spheres, spheres_count, local_state);
     }
 
     color = color / (float)cam->samples_per_pixel;
@@ -213,28 +261,6 @@ __global__ void render_kernel(unsigned char* img, const CameraData* cam, const S
     img[idx+1] = (unsigned char)(255.0f * clamp(color.y, 0.0f, 0.999f));
     img[idx+2] = (unsigned char)(255.0f * clamp(color.z, 0.0f, 0.999f));
 }
-
-__global__ void noise_kernel(unsigned char* img, const CameraData* cam, curandState* rng_state) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= cam->image_width || y >= cam->image_height) return;
-
-    int idx = y * cam->image_width + x;
-    curandState local_state = rng_state[idx];
-
-    float r = curand_uniform(&local_state);
-    float g = curand_uniform(&local_state);
-    float b = curand_uniform(&local_state);
-
-    rng_state[idx] = local_state;
-
-    int pixel_idx = 3 * idx;
-    img[pixel_idx + 0] = (unsigned char)(255.0f * r);
-    img[pixel_idx + 1] = (unsigned char)(255.0f * g);
-    img[pixel_idx + 2] = (unsigned char)(255.0f * b);
-}
-
-
 
 extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
     unsigned char *d_img;
@@ -260,7 +286,6 @@ extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
     float3 cam_center = make_float3(0.0f, 0.0f, 0.0f);
 
     render_kernel<<<grid, block>>>(d_img, cam, spheres, spheres_count, d_rng_state);
-    // noise_kernel<<<grid, block>>>(d_img, cam, d_rng_state);
 
     cudaMemcpy(img, d_img, img_size, cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
