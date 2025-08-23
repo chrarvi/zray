@@ -209,7 +209,7 @@ pub fn main() !void {
     var allocator = std.heap.page_allocator;
 
     const aspect_ratio = 16.0 / 9.0;
-    const image_width = 1600;
+    const image_width = 600;
     const image_height = @max(@divFloor(image_width, aspect_ratio), 1);
     const img = try allocator.alloc(u8, image_width * image_height * 3);
     defer allocator.free(img);
@@ -232,7 +232,7 @@ pub fn main() !void {
         .image_width = image_width,
         .image_height = image_height,
         .focal_length = 1.0,
-        .samples_per_pixel = 10,
+        .samples_per_pixel = 100,
         .max_depth = 50,
     };
 

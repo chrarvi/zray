@@ -144,6 +144,11 @@ __device__ float3 ray_at(const Ray* ray, float t) {
     return ray->origin + t * ray->dir;
 }
 
+__device__ float color_linear_to_gamma(float comp) {
+    if (comp > 0.0f) return sqrtf(comp);
+    return 0.0f;
+}
+
 __device__ bool sphere_hit(const Sphere *sphere, const Ray *ray, float ray_tmin,
                            float ray_tmax, HitRecord *hit_record) {
     const float3 oc = sphere->center - ray->origin;
@@ -210,7 +215,7 @@ __device__ Ray sample_ray(curandState *local_state, unsigned int img_x, unsigned
     return Ray{.origin = ray_origin, .dir = ray_direction};
 }
 
-__device__ float3 ray_color(const Ray& ray, int max_depth, const Sphere* spheres, unsigned int spheres_count, curandState* state) {
+__device__ float3 ray_color(const Ray& ray, int max_depth, const Sphere* spheres, unsigned int spheres_count, curandState* local_state) {
     Ray current_ray = ray;
     float3 attenuation = make_float3(1.0f, 1.0f, 1.0f);
     float3 color = make_float3(0.0f, 0.0f, 0.0f);
@@ -218,7 +223,8 @@ __device__ float3 ray_color(const Ray& ray, int max_depth, const Sphere* spheres
     for (int depth = 0; depth < max_depth; ++depth) {
         HitRecord hit_record;
         if (spheres_hit(&current_ray, spheres, spheres_count, 0.001f, INFINITY, &hit_record)) {
-            float3 dir = random_on_hemisphere(state, hit_record.normal);
+            // lambertian
+            float3 dir = hit_record.normal + random_unit_vector(local_state);
             current_ray.origin = hit_record.point + 1e-4f * hit_record.normal;
             current_ray.dir = dir;
             attenuation = attenuation * 0.5f;
@@ -255,11 +261,15 @@ __global__ void render_kernel(unsigned char* img, const CameraData* cam, const S
     }
 
     color = color / (float)cam->samples_per_pixel;
+    // gamma correction
+    float r = color_linear_to_gamma(color.x);
+    float g = color_linear_to_gamma(color.y);
+    float b = color_linear_to_gamma(color.z);
 
     int idx = 3 * (y * cam->image_width + x);
-    img[idx+0] = (unsigned char)(255.0f * clamp(color.x, 0.0f, 0.999f));
-    img[idx+1] = (unsigned char)(255.0f * clamp(color.y, 0.0f, 0.999f));
-    img[idx+2] = (unsigned char)(255.0f * clamp(color.z, 0.0f, 0.999f));
+    img[idx+0] = (unsigned char)(255.0f * clamp(r, 0.0f, 0.999f));
+    img[idx+1] = (unsigned char)(255.0f * clamp(g, 0.0f, 0.999f));
+    img[idx+2] = (unsigned char)(255.0f * clamp(b, 0.0f, 0.999f));
 }
 
 extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
