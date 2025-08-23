@@ -21,7 +21,7 @@ const Sphere = struct {
     center: vec3f,
     radius: f32,
 
-    fn hit(self: *const Sphere, ray: *const Ray, ray_tmin: f32, ray_tmax: f32) ?HitRecord {
+    fn hit(self: *const Sphere, ray: *const Ray, ray_t: Interval) ?HitRecord {
         const oc = self.center - ray.origin;
         const a = vec3f_dot(ray.dir, ray.dir);
         const h = vec3f_dot(ray.dir, oc);
@@ -34,9 +34,9 @@ const Sphere = struct {
 
         const sqrtd = @sqrt(disc);
         var root = (h - sqrtd) / a;
-        if ((root <= ray_tmin) or (ray_tmax <= root)) {
+        if (!ray_t.surrounds(root)) {
             root = (h + sqrtd) / a;
-            if ((root < ray_tmin) or (ray_tmax <= root)) {
+            if (!ray_t.surrounds(root)) {
                 return null;
             }
         }
@@ -66,11 +66,11 @@ const World = struct {
         self.objects.deinit();
     }
 
-    fn hit(self: *const World, ray: *const Ray, ray_tmin: f32, ray_tmax: f32) ?HitRecord {
-        var closest_so_far = ray_tmax;
+    fn hit(self: *const World, ray: *const Ray, ray_t: Interval) ?HitRecord {
+        var closest_so_far = ray_t.max;
         var hit_record: ?HitRecord = null;
         for (self.objects.items) |*obj| {
-            const temp_rec = obj.hit(ray, ray_tmin, closest_so_far);
+            const temp_rec = obj.hit(ray, .{ .min = ray_t.min, .max = closest_so_far });
             if (temp_rec != null) {
                 closest_so_far = temp_rec.?.t;
                 hit_record = temp_rec;
@@ -89,6 +89,31 @@ const Ray = struct {
     }
 };
 
+const Interval = struct {
+    min: f32,
+    max: f32,
+
+    fn universe() Interval {
+        return .{ .min = std.math.floatMin(f32), .max = std.math.floatMax(f32) };
+    }
+
+    fn empty() Interval {
+        return .{ .min = std.math.floatMax(f32), .max = std.math.floatMin(f32) };
+    }
+
+    fn size(self: *const Interval) f32 {
+        return self.max - self.min;
+    }
+
+    fn contains(self: *const Interval, v: f32) bool {
+        return self.min <= v and v <= self.max;
+    }
+
+    fn surrounds(self: *const Interval, v: f32) bool {
+        return self.min < v and v < self.max;
+    }
+};
+
 fn vec3f_norm(vec: vec3f) f32 {
     return @sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
 }
@@ -104,7 +129,7 @@ fn vec3f_dot(a: vec3f, b: vec3f) f32 {
 }
 
 fn ray_color(ray: *const Ray, world: *const World) vec3f {
-    const hit = world.hit(ray, 0.0, std.math.floatMax(f32));
+    const hit = world.hit(ray, .{ .min = 0.0, .max = std.math.floatMax(f32) });
 
     if (hit != null) {
         return @as(vec3f, @splat(0.5)) * (hit.?.normal + @as(vec3f, @splat(1.0)));
