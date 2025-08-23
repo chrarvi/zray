@@ -103,8 +103,8 @@ __device__ float clamp(float v, float mn, float mx) {
 }
 
 __device__ bool near_zero(float3 v) {
-    auto s = 1e-8;
-    return (std::fabs(v.x) < s) && (std::fabs(v.y) < s) && (std::fabs(v.z) < s);
+    float s = 1e-8f;
+    return (fabsf(v.x) < s) && (fabsf(v.y) < s) && (fabsf(v.z) < s);
 }
 
 __device__ float3 random_float3_uniform(curandState* local_state, float mn, float mx) {
@@ -337,6 +337,7 @@ extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
 
     curandState *d_rng_state;
     cudaMalloc(&d_rng_state, cam->image_height * cam->image_width * sizeof(curandState));
+    cudaDeviceSynchronize();
 
     dim3 block(16, 16);
     dim3 grid((cam->image_width + block.x - 1) / block.x,
@@ -354,13 +355,18 @@ extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
     };
     size_t spheres_count = sizeof(spheres) / sizeof(spheres[0]);
 
+    Sphere *d_spheres;
+    cudaMalloc(&d_spheres, sizeof(spheres));
+    cudaMemcpy(d_spheres, spheres, sizeof(spheres), cudaMemcpyHostToDevice);
+
     float3 cam_center = make_float3(0.0f, 0.0f, 0.0f);
 
-    render_kernel<<<grid, block>>>(d_img, cam, spheres, spheres_count, d_rng_state);
+    render_kernel<<<grid, block>>>(d_img, cam, d_spheres, spheres_count, d_rng_state);
 
     cudaMemcpy(img, d_img, img_size, cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
 
     cudaFree(d_img);
     cudaFree(d_rng_state);
+    cudaFree(d_spheres);
 }
