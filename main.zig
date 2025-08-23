@@ -114,6 +114,76 @@ const Interval = struct {
     }
 };
 
+const Camera = struct {
+    aspect_ratio: f32,
+    image_width: u32,
+    image_height: u32,
+    center: vec3f,
+    pixel00_loc: vec3f,
+    pixel_delta_u: vec3f,
+    pixel_delta_v: vec3f,
+
+    fn init(aspect_ratio: f32, image_width: u32, image_height: u32, center: vec3f) Camera {
+        const image_width_f32 = @as(f32, @floatFromInt(image_width));
+        const image_height_f32: f32 = @as(f32, @floatFromInt(image_height));
+        const viewport_height: f32 = 2.0;
+        const viewport_width = viewport_height * image_width_f32 / image_height_f32;
+
+        const focal_length = 1.0;
+        const camera_center = vec3f{ 0.0, 0.0, 0.0 };
+
+        const viewport_u = vec3f{ viewport_width, 0.0, 0.0 };
+        const viewport_v = vec3f{ 0.0, -viewport_height, 0.0 };
+
+        const pixel_delta_u = viewport_u / @as(vec3f, @splat(image_width_f32));
+        const pixel_delta_v = viewport_v / @as(vec3f, @splat(image_height_f32));
+        const two = @as(vec3f, @splat(2.0));
+        const viewport_upper_left = camera_center - vec3f{ 0.0, 0.0, focal_length } - viewport_u / two - viewport_v / two;
+        const pixel00_loc = viewport_upper_left + (pixel_delta_u + pixel_delta_v) / two;
+        return .{
+            .aspect_ratio = aspect_ratio,
+            .image_width = image_width,
+            .image_height = image_height,
+            .center = center,
+            .pixel00_loc = pixel00_loc,
+            .pixel_delta_u = pixel_delta_u,
+            .pixel_delta_v = pixel_delta_v,
+        };
+    }
+
+
+    fn render(self: *const Camera, world: *const World, img: []u8) void {
+        for (0..self.image_height) |img_y| {
+            for (0..self.image_width) |img_x| {
+                const x_vf32 = @as(vec3f, @splat(@as(f32, @floatFromInt(img_x))));
+                const y_vf32 = @as(vec3f, @splat(@as(f32, @floatFromInt(img_y))));
+                const pixel_center = self.pixel00_loc + (x_vf32 * self.pixel_delta_u) + (y_vf32 * self.pixel_delta_v);
+                const ray_direction = pixel_center - self.center;
+                const ray = Ray{ .dir = ray_direction, .origin = self.center };
+                const color = ray_color(&ray, world);
+                const idx = 3 * (self.image_width * img_y + img_x);
+
+                img[idx + 0] = @intFromFloat(255.0 * @max(@min(1.0, color[0]), 0.0));
+                img[idx + 1] = @intFromFloat(255.0 * @max(@min(1.0, color[1]), 0.0));
+                img[idx + 2] = @intFromFloat(255.0 * @max(@min(1.0, color[2]), 0.0));
+            }
+        }
+
+    }
+
+    fn ray_color(ray: *const Ray, world: *const World) vec3f {
+        const hit = world.hit(ray, .{ .min = 0.0, .max = std.math.floatMax(f32) });
+
+        if (hit != null) {
+            return @as(vec3f, @splat(0.5)) * (hit.?.normal + @as(vec3f, @splat(1.0)));
+        }
+        const unit_dir = vec3f_normalize(ray.dir);
+        const a = 0.5 * (unit_dir[1] + 1.0);
+        const a_v = @as(vec3f, @splat(a));
+        return @as(vec3f, @splat(1.0 - a)) * @as(vec3f, @splat(1.0)) + a_v * vec3f{ 0.5, 0.7, 1.0 };
+    }
+};
+
 fn vec3f_norm(vec: vec3f) f32 {
     return @sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
 }
@@ -128,42 +198,16 @@ fn vec3f_dot(a: vec3f, b: vec3f) f32 {
     return c[0] + c[1] + c[2];
 }
 
-fn ray_color(ray: *const Ray, world: *const World) vec3f {
-    const hit = world.hit(ray, .{ .min = 0.0, .max = std.math.floatMax(f32) });
-
-    if (hit != null) {
-        return @as(vec3f, @splat(0.5)) * (hit.?.normal + @as(vec3f, @splat(1.0)));
-    }
-    const unit_dir = vec3f_normalize(ray.dir);
-    const a = 0.5 * (unit_dir[1] + 1.0);
-    const a_v = @as(vec3f, @splat(a));
-    return @as(vec3f, @splat(1.0 - a)) * @as(vec3f, @splat(1.0)) + a_v * vec3f{ 0.5, 0.7, 1.0 };
-}
-
 pub fn main() !void {
     var allocator = std.heap.page_allocator;
 
     const aspect_ratio = 16.0 / 9.0;
     const image_width = 400;
-    const image_height: i32 = @max(@divFloor(image_width, aspect_ratio), 1);
+    const image_height = @max(@divFloor(image_width, aspect_ratio), 1);
     const img = try allocator.alloc(u8, image_width * image_height * 3);
     defer allocator.free(img);
 
-    const viewport_height: f32 = 2.0;
-    const viewport_width = viewport_height * @as(f32, @floatFromInt(image_width)) / @as(f32, @floatFromInt(image_height));
-
-    const focal_length = 1.0;
-    const camera_center = vec3f{ 0.0, 0.0, 0.0 };
-
-    const viewport_u = vec3f{ viewport_width, 0.0, 0.0 };
-    const viewport_v = vec3f{ 0.0, -viewport_height, 0.0 };
-
-    const pixel_delta_u = viewport_u / @as(vec3f, @splat(@as(f32, @floatFromInt(image_width))));
-    const pixel_delta_v = viewport_v / @as(vec3f, @splat(@as(f32, @floatFromInt(image_height))));
-
-    const two = @as(vec3f, @splat(2.0));
-    const viewport_upper_left = camera_center - vec3f{ 0.0, 0.0, focal_length } - viewport_u / two - viewport_v / two;
-    const pixel00_loc = viewport_upper_left + (pixel_delta_u + pixel_delta_v) / two;
+    const camera = Camera.init(aspect_ratio, image_width, image_height, .{ 0.0, 0.0, 0.0 });
 
     var world = World.init(allocator);
     defer world.deinit();
@@ -175,21 +219,7 @@ pub fn main() !void {
         .{ .center = .{ 0.0, -100.5, -1.0 }, .radius = 100.0 },
     );
 
-    for (0..image_height) |img_y| {
-        for (0..image_width) |img_x| {
-            const x_vf32 = @as(vec3f, @splat(@as(f32, @floatFromInt(img_x))));
-            const y_vf32 = @as(vec3f, @splat(@as(f32, @floatFromInt(img_y))));
-            const pixel_center = pixel00_loc + (x_vf32 * pixel_delta_u) + (y_vf32 * pixel_delta_v);
-            const ray_direction = pixel_center - camera_center;
-            const ray = Ray{ .dir = ray_direction, .origin = camera_center };
-            const color = ray_color(&ray, &world);
-            const idx = 3 * (image_width * img_y + img_x);
-
-            img[idx + 0] = @intFromFloat(255.0 * @max(@min(1.0, color[0]), 0.0));
-            img[idx + 1] = @intFromFloat(255.0 * @max(@min(1.0, color[1]), 0.0));
-            img[idx + 2] = @intFromFloat(255.0 * @max(@min(1.0, color[2]), 0.0));
-        }
-    }
+    camera.render(&world, img);
 
     if (stbiw.stbi_write_png("output.png", image_width, image_height, 3, img.ptr, image_width * 3) == 0) {
         return error.ImageWriteFailed;
