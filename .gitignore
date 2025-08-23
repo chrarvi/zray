@@ -1,0 +1,4 @@
+*.o
+*.png
+zig-out/
+.zig-cache/
