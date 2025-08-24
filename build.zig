@@ -38,10 +38,10 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
 
     const cuda_gen_step = b.addSystemCommand(&.{
-        "nvcc", "-Xcompiler", "-fPIC", "-c", "-o", "raycast.o", "cuda/raycast.cu",
+        "nvcc", "-Xcompiler", "-fPIC", "-c", "-o", "build/raycast.o", "cuda/raycast.cu",
     });
     exe.step.dependOn(&cuda_gen_step.step);
-    exe.addObjectFile(b.path("raycast.o"));
+    exe.addObjectFile(b.path("build/raycast.o"));
     exe.addLibraryPath(.{
         .cwd_relative = "/opt/cuda/lib64/",
     });
