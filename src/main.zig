@@ -3,7 +3,8 @@ const stbiw = @import("stb_image_write");
 const rl = @import("raylib");
 const al = @import("math.zig");
 
-const Camera = @import("camera.zig");
+const Camera = @import("Camera.zig");
+const mat = @import("material.zig");
 
 extern fn launch_raycast(img: [*]u8, cam: *const CameraData, spheres: [*]Sphere, spheres_count: usize) void;
 
@@ -18,21 +19,10 @@ const CameraData = extern struct {
     camera_to_world: al.Mat4,
 };
 
-const MaterialKind = enum(u32) {
-    LAMBERTIAN = 0,
-    METAL = 1,
-};
-
-const Material = extern struct {
-    kind: MaterialKind,
-    albedo: [3]f32,
-    fuzz: f32 = 0.0,
-};
-
 const Sphere = extern struct {
     center: [3]f32,
     radius: f32,
-    material: Material,
+    material: mat.Material,
 };
 
 pub fn main() !void {
@@ -76,10 +66,10 @@ pub fn main() !void {
     var spheres = std.ArrayList(Sphere).init(allocator);
     defer spheres.deinit();
 
-    const lambertian_mat = Material{ .kind = MaterialKind.LAMBERTIAN, .albedo = .{ 0.1, 0.2, 0.5 } };
-    const metal_mat = Material{ .kind = MaterialKind.METAL, .albedo = .{ 0.8, 0.8, 0.8 }, .fuzz = 0.05 };
-    const metal_mat2 = Material{ .kind = MaterialKind.METAL, .albedo = .{ 0.8, 0.6, 0.3 }};
-    const ground_mat = Material{ .kind = MaterialKind.LAMBERTIAN, .albedo = .{ 0.8, 0.8, 0.8 } };
+    const lambertian_mat = mat.Material{ .kind = mat.MaterialKind.LAMBERTIAN, .albedo = .{ 0.1, 0.2, 0.5 } };
+    const metal_mat = mat.Material{ .kind = mat.MaterialKind.METAL, .albedo = .{ 0.8, 0.8, 0.8 }, .fuzz = 0.05 };
+    const metal_mat2 = mat.Material{ .kind = mat.MaterialKind.METAL, .albedo = .{ 0.8, 0.6, 0.3 }};
+    const ground_mat = mat.Material{ .kind = mat.MaterialKind.LAMBERTIAN, .albedo = .{ 0.8, 0.8, 0.8 } };
     try spheres.append(
         .{ .center = .{ -0.8, -0.15, -0.8 }, .radius = 0.3, .material = lambertian_mat },
     );
