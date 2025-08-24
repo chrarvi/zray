@@ -1,6 +1,7 @@
 const std = @import("std");
 const stbiw = @import("stb_image_write");
 const rl = @import("raylib");
+const al = @import("math.zig");
 
 const Camera = @import("camera.zig");
 
@@ -13,6 +14,8 @@ const CameraData = extern struct {
     focal_length: f32,
     samples_per_pixel: u32,
     max_depth: i32,
+
+    camera_to_world: al.Mat4,
 };
 
 const MaterialKind = enum(u32) {
@@ -41,12 +44,19 @@ pub fn main() !void {
     const img = try allocator.alloc(u8, image_width * image_height * 3);
     defer allocator.free(img);
 
+    const cam = Camera.init(
+        .{0.0, 0.0, 3.0},  // eye
+        .{0.0, 0.0, 0.0},  // target
+        .{0.0, 1.0, 0.0},  // up
+    );
+
     var camera_data = CameraData{
         .image_width = image_width,
         .image_height = image_height,
         .focal_length = 1.0,
         .samples_per_pixel = 10,
         .max_depth = 10,
+        .camera_to_world = cam.camera_to_world(),
     };
 
     rl.InitWindow(image_width, image_height, "Raylib test");
@@ -80,18 +90,6 @@ pub fn main() !void {
         .{ .center = .{ 0.8, -0.15, -0.8 }, .radius = 0.3, .material = metal_mat2 },
     );
     try spheres.append(.{ .center = .{ 0.0, -100.5, -1.0 }, .radius = 100.0, .material = ground_mat });
-
-    const cam = Camera.init(
-        .{0.0, 0.0, 3.0},  // eye
-        .{0.0, 0.0, 0.0},  // target
-        .{0.0, 1.0, 0.0},  // up
-    );
-
-    const view = cam.look_at();
-    const cam_to_world = cam.camera_to_world();
-
-    std.debug.print("View matrix: {any}\n", .{view});
-    std.debug.print("CameraToWorld matrix: {any}\n", .{cam_to_world});
 
     rl.SetTargetFPS(15);
 

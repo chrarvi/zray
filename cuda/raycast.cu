@@ -4,6 +4,7 @@
 
 #include <curand.h>
 #include <curand_kernel.h>
+#include "math.cuh"
 
 #define RNG_SEED 1234
 
@@ -11,7 +12,6 @@ typedef struct {
     float3 origin;
     float3 dir;
 } Ray;
-
 
 typedef enum {
     LAMBERTIAN = 0,
@@ -45,105 +45,10 @@ typedef struct {
     float focal_length;
     unsigned int samples_per_pixel;
     int max_depth;
+
+    float camera_to_world[4][4];
 } CameraData;
 
-__device__ float norm(float3 v) {
-    return norm3df(v.x, v.y, v.z);
-}
-__device__ float rnorm(float3 v) {
-    return rnorm3df(v.x, v.y, v.z);
-}
-
-__device__ float3 operator-(float3 a, float3 b) {
-    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-__device__ float3 operator-(float3 a, float b) {
-    return make_float3(a.x - b, a.y - b, a.z - b);
-}
-
-__device__ float3 operator+(float3 a, float3 b) {
-    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
-}
-
-__device__ float3 operator+(float3 a, float b) {
-    return make_float3(a.x + b, a.y + b, a.z + b);
-}
-
-__device__ float3 operator+(float a, float3 b) {
-    return make_float3(a + b.x, a + b.y, a + b.z);
-}
-
-__device__ float3 operator*(float3 v, float c) {
-    return make_float3(v.x * c, v.y * c, v.z * c);
-}
-__device__ float3 operator*(float3 a, float3 b) {
-    return make_float3(a.x * b.x, a.y * b.y, a.z * b.z);
-}
-
-__device__ float3 operator/(float3 v, float c) {
-    const float r = 1/c;
-    return v * r;
-}
-
-__device__ float3 normalize(float3 v) {
-    return v / norm(v);
-}
-
-__device__ float3 operator*(float a, float3 b) {
-    return make_float3(a * b.x, a * b.y, a * b.z);
-}
-
-__device__ float dot(float3 a, float3 b) {
-    return a.x*b.x + a.y* b.y + a.z*b.z;
-}
-
-__device__ float clamp(float v, float mn, float mx) {
-    return fmaxf(fminf(v, mx), mn);
-}
-
-__device__ bool near_zero(float3 v) {
-    float s = 1e-8f;
-    return (fabsf(v.x) < s) && (fabsf(v.y) < s) && (fabsf(v.z) < s);
-}
-
-__device__ float3 random_float3_uniform(curandState* local_state, float mn, float mx) {
-    float c = mn + (mx - mn);
-    float x = c * curand_uniform(local_state);
-    float y = c * curand_uniform(local_state);
-    float z = c * curand_uniform(local_state);
-
-    return make_float3(x, y, z);
-}
-
-
-#define PI 3.14159265358979323846f
-__device__ float3 random_unit_vector(curandState* local_state) {
-    // pretty expensive but it's better than rejection sampling
-    float u = curand_uniform(local_state);
-    float theta = 2.0f * PI * curand_uniform(local_state);
-
-    float z = 1.0f - 2.0f * u;
-    float r = sqrtf(1.0f - z * z);
-
-    float x = r * cosf(theta);
-    float y = r * sinf(theta);
-
-    return make_float3(x, y, z);
-}
-
-__device__ float3 random_on_hemisphere(curandState* local_state, const float3 normal) {
-    float3 on_unit_sphere = random_unit_vector(local_state);
-    if (dot(on_unit_sphere, normal) > 0.0) {
-        return on_unit_sphere;
-    } else {
-        return -1.0 * on_unit_sphere;
-    }
-}
-
-__device__ float3 reflect(float3 v, float3 n) {
-    return v - 2.0f * dot(v, n) * n;
-}
 
 __global__ void setup_rng(curandState* state, int width, int height) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -253,14 +158,6 @@ __device__ float3 sample_square(curandState *local_state) {
     return make_float3(x, y, z);
 }
 
-__device__ Ray sample_ray(curandState *local_state, unsigned int img_x, unsigned int img_y, float3 pixel00_loc, float3 pixel_delta_u, float3 pixel_delta_v, float3 ray_origin) {
-    const float3 offset = sample_square(local_state);
-    const float3 pixel_sample = pixel00_loc + ((img_x + offset.x) * pixel_delta_u) + ((img_y + offset.y) * pixel_delta_v);
-
-    const float3 ray_direction = pixel_sample - ray_origin;
-    return Ray{.origin = ray_origin, .dir = ray_direction};
-}
-
 __device__ float3 ray_color(const Ray& ray, int max_depth, const Sphere* spheres, unsigned int spheres_count, curandState* local_state) {
     Ray current_ray = ray;
     float3 attenuation = make_float3(1.0f, 1.0f, 1.0f);
@@ -302,23 +199,37 @@ __global__ void render_kernel(unsigned char* img, const CameraData* cam, const S
     if (x >= cam->image_width || y >= cam->image_height) return;
 
     const float viewport_height = 2.0f;
-    const float viewport_width = viewport_height * (float)cam->image_width / (float)cam->image_height;
-    const float3 viewport_u = make_float3( viewport_width, 0.0, 0.0 );
-    const float3 viewport_v = make_float3( 0.0, -viewport_height, 0.0);
-    const float3 camera_center = make_float3(0.0f, 0.0f, 0.0f);
-    const float3 pixel_delta_u = viewport_u / (float)cam->image_width;
-    const float3 pixel_delta_v = viewport_v / (float)cam->image_height;
-    const float3 viewport_upper_left = camera_center - make_float3(0.0f, 0.0f, cam->focal_length) - viewport_u / 2.0f - viewport_v / 2.0f;
-    const float3 pixel00_loc = viewport_upper_left + (pixel_delta_u + pixel_delta_v) / 2.0f;
+    const float viewport_width  = viewport_height * (float)cam->image_width / (float)cam->image_height;
+
+    const float3 pixel_delta_u = make_float3(viewport_width / (float)cam->image_width, 0.0f, 0.0f);
+    const float3 pixel_delta_v = make_float3(0.0f, -viewport_height / (float)cam->image_height, 0.0f);
+
+    const float3 viewport_upper_left = make_float3(-viewport_width / 2.0f, viewport_height / 2.0f, -cam->focal_length);
+    const float3 pixel00_loc = viewport_upper_left + (pixel_delta_u + pixel_delta_v) * 0.5f;
 
     curandState* local_state = &rng_state[y * cam->image_width + x];
     float3 color = make_float3(0.0f, 0.0f, 0.0f);
+
     for (size_t sample = 0u; sample < cam->samples_per_pixel; ++sample) {
-        const Ray ray = sample_ray(local_state, x, y, pixel00_loc, pixel_delta_u, pixel_delta_v, camera_center);
+        float3 offset = sample_square(local_state);
+        float3 pixel_sample = pixel00_loc + (x + offset.x) * pixel_delta_u + (y + offset.y) * pixel_delta_v;
+
+        float4 origin_cam = make_float4(0.0f, 0.0f, 0.0f, 1.0f);
+        float4 dir_cam    = make_float4(pixel_sample.x, pixel_sample.y, pixel_sample.z, 0);
+
+        float4 origin_world4 = mmul(cam->camera_to_world, origin_cam);
+        float4 dir_world4    = mmul(cam->camera_to_world, dir_cam);
+
+        Ray ray = Ray {
+            .origin = make_float3(origin_world4.x, origin_world4.y, origin_world4.z),
+            .dir    = normalize(make_float3(dir_world4.x, dir_world4.y, dir_world4.z)),
+        };
+
         color = color + ray_color(ray, cam->max_depth, spheres, spheres_count, local_state);
     }
 
     color = color / (float)cam->samples_per_pixel;
+
     // gamma correction
     float r = color_linear_to_gamma(color.x);
     float g = color_linear_to_gamma(color.y);
