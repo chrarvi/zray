@@ -15,6 +15,13 @@ pub fn build(b: *std.Build) void {
     stbiw_mod.addCSourceFile(.{ .file = stbiw_c_path });
     stbiw_mod.addIncludePath(b.path("external"));
 
+    const raylib_translate = b.addTranslateC(.{
+        .root_source_file = b.path("external/raylib-5.5_linux_amd64/include/raylib.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const raylib_mod = raylib_translate.createModule();
+
     const exe = b.addExecutable(.{
         .name = "main",
         .root_module = b.createModule(
@@ -23,7 +30,11 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.root_module.addImport("stb_image_write", stbiw_mod);
-    exe.addIncludePath(b.path("external"));
+    exe.root_module.addImport("raylib", raylib_mod);
+
+    exe.addLibraryPath(b.path("external/raylib-5.5_linux_amd64/lib/"));
+    exe.linkSystemLibrary("raylib");
+
     exe.linkLibC();
 
     const cuda_gen_step = b.addSystemCommand(&.{
@@ -34,6 +45,7 @@ pub fn build(b: *std.Build) void {
     exe.addLibraryPath(.{
         .cwd_relative = "/opt/cuda/lib64/",
     });
+    exe.addIncludePath(.{ .cwd_relative = "/opt/cuda/include"});
     exe.linkSystemLibrary("cudart");
 
     b.installArtifact(exe);

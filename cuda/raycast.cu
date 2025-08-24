@@ -330,7 +330,11 @@ __global__ void render_kernel(unsigned char* img, const CameraData* cam, const S
     img[idx+2] = (unsigned char)(255.0f * clamp(b, 0.0f, 0.999f));
 }
 
-extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
+extern "C" void launch_raycast(unsigned char *img, const CameraData* cam, const Sphere* spheres, size_t spheres_count) {
+    Sphere* d_spheres;
+    cudaMalloc((void**)&d_spheres, spheres_count * sizeof(spheres[0]));
+    cudaMemcpy(d_spheres, spheres, spheres_count * sizeof(spheres[0]), cudaMemcpyHostToDevice);
+
     unsigned char *d_img;
     size_t img_size = cam->image_height * cam->image_width * 3U * sizeof(unsigned char);
     cudaMalloc((void**)&d_img, img_size);
@@ -345,22 +349,6 @@ extern "C" void launch_raycast(unsigned char *img, const CameraData* cam) {
                 (cam->image_height + block.y - 1) / block.y);
 
     setup_rng<<<grid, block>>>(d_rng_state, cam->image_width, cam->image_height);
-
-    Material lambertian_mat = {.kind = LAMBERTIAN, .albedo = make_float3(0.1f, 0.2f, 0.5f)};
-    Material metal_mat = {.kind = METAL, .albedo = make_float3(0.8f, 0.8f, 0.8f), .fuzz = 0.05f};
-    Material metal_mat2 = {.kind = METAL, .albedo = make_float3(0.8f, 0.6f, 0.3f), .fuzz = 0.0f};
-    Material ground_mat = {.kind = LAMBERTIAN, .albedo = make_float3(0.8f, 0.8f, 0.8f)};
-    Sphere spheres[] = {
-        {.center = {-0.8f, -0.15f, -0.8f}, .radius = 0.3f, .material = lambertian_mat},
-        {.center = {0.0f, 0.0f, -1.2f}, .radius = 0.5f, .material = metal_mat},
-        {.center = {0.8f, -0.15f, -0.8f}, .radius = 0.3f, .material = metal_mat2},
-        {.center = {0.0f, -100.5f, -1.0f}, .radius = 100.0f, .material = ground_mat}
-    };
-    size_t spheres_count = sizeof(spheres) / sizeof(spheres[0]);
-
-    Sphere *d_spheres;
-    cudaMalloc(&d_spheres, sizeof(spheres));
-    cudaMemcpy(d_spheres, spheres, sizeof(spheres), cudaMemcpyHostToDevice);
 
     float3 cam_center = make_float3(0.0f, 0.0f, 0.0f);
 
