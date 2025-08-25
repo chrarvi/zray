@@ -20,13 +20,7 @@ const CameraData = extern struct {
 const Sphere = extern struct {
     center: [3]f32,
     radius: f32,
-    material: Material,
-};
-
-const Material = extern struct {
-    kind: u32,
-    albedo: [3]f32,
-    fuzz: f32,
+    material: mat.Material,
 };
 
 const AtomicUsize = std.atomic.Value(usize);
@@ -104,10 +98,14 @@ pub fn main() !void {
 
     var spheres = try gpa.alloc(Sphere, 4);
     defer gpa.free(spheres);
-    spheres[0] = .{ .center = .{ -0.8, -0.15, -0.8 }, .radius = 0.3, .material = .{ .kind = 0, .albedo = .{0.1,0.2,0.5}, .fuzz = 0 } };
-    spheres[1] = .{ .center = .{  0.0,  0.0, -1.2 }, .radius = 0.5, .material = .{ .kind = 1, .albedo = .{0.8,0.8,0.8}, .fuzz = 0.05 } };
-    spheres[2] = .{ .center = .{  0.8, -0.15, -0.8 }, .radius = 0.3, .material = .{ .kind = 1, .albedo = .{0.8,0.6,0.3}, .fuzz = 0 } };
-    spheres[3] = .{ .center = .{  0.0, -100.5, -1.0 }, .radius = 100.0, .material = .{ .kind = 0, .albedo = .{0.8,0.8,0.8}, .fuzz = 0 } };
+    const lambertian_mat = mat.Material{ .kind = mat.MaterialKind.LAMBERTIAN, .albedo = .{ 0.1, 0.2, 0.5 } };
+    const metal_mat = mat.Material{ .kind = mat.MaterialKind.METAL, .albedo = .{ 0.8, 0.8, 0.8 }, .fuzz = 0.05 };
+    const ground_mat = mat.Material{ .kind = mat.MaterialKind.LAMBERTIAN, .albedo = .{ 0.8, 0.8, 0.8 } };
+    const emit_mat = mat.Material{ .kind = mat.MaterialKind.EMISSIVE, .emit = .{ 1.0, 1.0, 1.0 } };
+    spheres[0] = .{ .center = .{ -0.8, -0.15, -0.8 }, .radius = 0.3, .material = lambertian_mat};
+    spheres[1] = .{ .center = .{  0.0,  0.0, -1.2 }, .radius = 0.5, .material = emit_mat};
+    spheres[2] = .{ .center = .{  0.8, -0.15, -0.8 }, .radius = 0.3, .material = metal_mat};
+    spheres[3] = .{ .center = .{  0.0, -100.5, -1.0 }, .radius = 100.0, .material = ground_mat};
 
     rl.InitWindow(@as(i32, @intCast(image_width)), @as(i32, @intCast(image_height)), "Sim/Render decoupled");
     defer rl.CloseWindow();

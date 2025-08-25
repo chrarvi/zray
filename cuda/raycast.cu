@@ -15,13 +15,15 @@ typedef struct {
 
 typedef enum {
     LAMBERTIAN = 0,
-    METAL = 1
+    METAL = 1,
+    EMISSIVE = 2
 } MaterialKind;
 
 typedef struct {
     MaterialKind kind;
     float3 albedo;
     float fuzz;
+    float3 emit;
 } Material;
 
 typedef struct {
@@ -175,6 +177,8 @@ __device__ float3 ray_color(const Ray& ray, int max_depth, const Sphere* spheres
             case METAL:
                 scattered = scatter_metal(&current_ray, &hit_record, local_state, &attenuation, &temp_ray);
                 break;
+            case EMISSIVE:
+                return color + attenuation * hit_record.material.emit;
             }
             if (scattered) {
                 current_ray.origin = hit_record.point + 1e-4f * hit_record.normal;
