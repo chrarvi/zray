@@ -6,7 +6,10 @@ const al = @import("math.zig");
 const Camera = @import("Camera.zig");
 const mat = @import("material.zig");
 
-extern fn launch_raycast(img: [*]u8, cam: *const CameraData, spheres: [*]Sphere, spheres_count: usize) void;
+extern fn init_cuda(cam: *const CameraData, spheres_count: usize) void;
+extern fn update_spheres(spheres: [*]const Sphere, spheres_count: usize) void;
+extern fn launch_raycast(img: [*]u8, cam: *const CameraData, spheres: [*]const Sphere, spheres_count: usize) void;
+extern fn cleanup_cuda() void;
 
 const CameraData = extern struct {
     image_width: u32,
@@ -27,21 +30,24 @@ const AtomicUsize = std.atomic.Value(usize);
 const AtomicBool = std.atomic.Value(bool);
 
 const SimSharedState = struct {
-    buffers: [2][]u8,           // double-buffering
-    ready_idx: AtomicUsize,     // which buffer is ready for display
-    running: AtomicBool,        // shutdown flag
-    cam: *const CameraData,
+    buffers: [2][]u8, // double-buffering
+    ready_idx: AtomicUsize, // which buffer is ready for display
+    running: AtomicBool, // shutdown flag
+    cam: CameraData,
     spheres: [*]Sphere,
     spheres_count: usize,
 };
 
-const SIMULATION_FRAMERATE: f32 = 10.0;
+const SIMULATION_FRAMERATE: f32 = 30.0;
 const RENDERING_FRAMERATE: f32 = 60.0;
 
 fn run_sim(shared: *SimSharedState) !void {
     var frame: f32 = 0.0;
     const sim_dt = 1.0 / SIMULATION_FRAMERATE;
     var last = rl.GetTime();
+
+    init_cuda(&shared.cam, shared.spheres_count);
+    defer cleanup_cuda();
 
     while (shared.running.load(.acquire)) {
         const now = rl.GetTime();
@@ -53,13 +59,14 @@ fn run_sim(shared: *SimSharedState) !void {
 
         const t = frame * 0.03;
         shared.spheres[0].center[0] = -0.8 + 0.3 * @sin(t);
-        shared.spheres[1].center[1] =  0.0 + 0.2 * @sin(t * 1.5);
-        shared.spheres[2].center[0] =  0.8 + 0.3 * @sin(t * 0.8);
+        shared.spheres[1].center[1] = 0.0 + 0.2 * @sin(t * 1.5);
+        shared.spheres[2].center[0] = 0.8 + 0.3 * @sin(t * 0.8);
 
         const current_ready = shared.ready_idx.load(.acquire);
         const write_idx: usize = 1 - current_ready;
 
-        launch_raycast(shared.buffers[write_idx].ptr, shared.cam, shared.spheres, shared.spheres_count);
+        update_spheres(shared.spheres, shared.spheres_count);
+        launch_raycast(shared.buffers[write_idx].ptr, &shared.cam, shared.spheres, shared.spheres_count);
 
         shared.ready_idx.store(write_idx, .release);
 
@@ -81,31 +88,16 @@ pub fn main() !void {
     const img1 = try gpa.alloc(u8, buf_size);
     defer gpa.free(img1);
 
-    // camera + spheres (owned by sim thread; main must not mutate)
-    var camera_data = CameraData{
-        .image_width = image_width,
-        .image_height = image_height,
-        .focal_length = 1.0,
-        .samples_per_pixel = 16,
-        .max_depth = 10,
-        .camera_to_world = [_]f32{
-            1,0,0,0,
-            0,1,0,0,
-            0,0,1,0,
-            0,0,0,1,
-        },
-    };
-
     var spheres = try gpa.alloc(Sphere, 4);
     defer gpa.free(spheres);
     const lambertian_mat = mat.Material{ .kind = mat.MaterialKind.LAMBERTIAN, .albedo = .{ 0.1, 0.2, 0.5 } };
     const metal_mat = mat.Material{ .kind = mat.MaterialKind.METAL, .albedo = .{ 0.8, 0.8, 0.8 }, .fuzz = 0.05 };
     const ground_mat = mat.Material{ .kind = mat.MaterialKind.LAMBERTIAN, .albedo = .{ 0.8, 0.8, 0.8 } };
     const emit_mat = mat.Material{ .kind = mat.MaterialKind.EMISSIVE, .emit = .{ 1.0, 1.0, 1.0 } };
-    spheres[0] = .{ .center = .{ -0.8, -0.15, -0.8 }, .radius = 0.3, .material = lambertian_mat};
-    spheres[1] = .{ .center = .{  0.0,  0.0, -1.2 }, .radius = 0.5, .material = emit_mat};
-    spheres[2] = .{ .center = .{  0.8, -0.15, -0.8 }, .radius = 0.3, .material = metal_mat};
-    spheres[3] = .{ .center = .{  0.0, -100.5, -1.0 }, .radius = 100.0, .material = ground_mat};
+    spheres[0] = .{ .center = .{ -0.8, -0.15, -0.8 }, .radius = 0.3, .material = lambertian_mat };
+    spheres[1] = .{ .center = .{ 0.0, 0.0, -1.2 }, .radius = 0.5, .material = emit_mat };
+    spheres[2] = .{ .center = .{ 0.8, -0.15, -0.8 }, .radius = 0.3, .material = metal_mat };
+    spheres[3] = .{ .center = .{ 0.0, -100.5, -1.0 }, .radius = 100.0, .material = ground_mat };
 
     rl.InitWindow(@as(i32, @intCast(image_width)), @as(i32, @intCast(image_height)), "Sim/Render decoupled");
     defer rl.CloseWindow();
@@ -125,11 +117,23 @@ pub fn main() !void {
         .buffers = .{ img0, img1 },
         .ready_idx = AtomicUsize.init(0),
         .running = AtomicBool.init(true),
-        .cam = &camera_data,
+        .cam = CameraData{
+            .image_width = image_width,
+            .image_height = image_height,
+            .focal_length = 1.0,
+            .samples_per_pixel = 32,
+            .max_depth = 10,
+            .camera_to_world = [16]f32{
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1,
+            },
+        },
         .spheres = spheres.ptr,
         .spheres_count = spheres.len,
     };
-    const sim_thread = try std.Thread.spawn(.{}, run_sim, .{ &shared });
+    const sim_thread = try std.Thread.spawn(.{}, run_sim, .{&shared});
     defer sim_thread.join();
 
     rl.SetTargetFPS(RENDERING_FRAMERATE);
