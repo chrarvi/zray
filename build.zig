@@ -45,7 +45,8 @@ pub fn build(b: *std.Build) void {
     exe.addLibraryPath(.{
         .cwd_relative = "/opt/cuda/lib64/",
     });
-    exe.addIncludePath(.{ .cwd_relative = "/opt/cuda/include"});
+    exe.addIncludePath(.{ .cwd_relative = "/opt/cuda/include" });
+    exe.addIncludePath(b.path("cuda"));
     exe.linkSystemLibrary("cudart");
 
     b.installArtifact(exe);

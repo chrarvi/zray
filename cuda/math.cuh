@@ -1,3 +1,6 @@
+#ifndef MATH_CUH_
+#define MATH_CUH_
+
 #include <cuda_runtime.h>
 #include <curand.h>
 #include <curand_kernel.h>
@@ -7,54 +10,53 @@
 
 #define PI 3.14159265358979323846f
 
-inline __device__ float norm(float3 v) {
+inline __device__ float norm(vec3 v) {
     return norm3df(v.x, v.y, v.z);
 }
-inline  __device__ float rnorm(float3 v) {
+inline  __device__ float rnorm(vec3 v) {
     return rnorm3df(v.x, v.y, v.z);
 }
 
-inline  __device__ float3 operator-(float3 a, float3 b) {
-    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
+inline  __device__ vec3 operator-(vec3 a, vec3 b) {
+    return {a.x - b.x, a.y - b.y, a.z - b.z};
 }
 
-inline  __device__ float3 operator-(float3 a, float b) {
-    return make_float3(a.x - b, a.y - b, a.z - b);
+inline  __device__ vec3 operator-(vec3 a, float b) {
+    return {a.x - b, a.y - b, a.z - b};
 }
 
-inline  __device__ float3 operator+(float3 a, float3 b) {
-    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
+inline  __device__ vec3 operator+(vec3 a, vec3 b) {
+    return {a.x + b.x, a.y + b.y, a.z + b.z};
 }
 
-inline  __device__ float3 operator+(float3 a, float b) {
-    return make_float3(a.x + b, a.y + b, a.z + b);
+inline  __device__ vec3 operator+(vec3 a, float b) {
+    return {a.x + b, a.y + b, a.z + b};
 }
 
-inline  __device__ float3 operator+(float a, float3 b) {
-    return make_float3(a + b.x, a + b.y, a + b.z);
+inline  __device__ vec3 operator+(float a, vec3 b) {
+    return {a + b.x, a + b.y, a + b.z};
 }
 
-inline  __device__ float3 operator*(float3 v, float c) {
-    return make_float3(v.x * c, v.y * c, v.z * c);
+inline  __device__ vec3 operator*(vec3 v, float c) {
+    return {v.x * c, v.y * c, v.z * c};
 }
-inline  __device__ float3 operator*(float3 a, float3 b) {
-    return make_float3(a.x * b.x, a.y * b.y, a.z * b.z);
+inline  __device__ vec3 operator*(vec3 a, vec3 b) {
+    return {a.x * b.x, a.y * b.y, a.z * b.z};
+}
+inline  __device__ vec3 operator*(float a, vec3 b) {
+    return {a * b.x, a * b.y, a * b.z};
 }
 
-inline  __device__ float3 operator/(float3 v, float c) {
+inline  __device__ vec3 operator/(vec3 v, float c) {
     const float r = 1/c;
     return v * r;
 }
 
-inline  __device__ float3 normalize(float3 v) {
+inline  __device__ vec3 normalize(vec3 v) {
     return v / norm(v);
 }
 
-inline  __device__ float3 operator*(float a, float3 b) {
-    return make_float3(a * b.x, a * b.y, a * b.z);
-}
-
-inline  __device__ float dot(float3 a, float3 b) {
+inline  __device__ float dot(vec3 a, vec3 b) {
     return a.x*b.x + a.y* b.y + a.z*b.z;
 }
 
@@ -62,21 +64,21 @@ inline  __device__ float clamp(float v, float mn, float mx) {
     return fmaxf(fminf(v, mx), mn);
 }
 
-inline  __device__ bool near_zero(float3 v) {
+inline  __device__ bool near_zero(vec3 v) {
     float s = 1e-8f;
     return (fabsf(v.x) < s) && (fabsf(v.y) < s) && (fabsf(v.z) < s);
 }
 
-inline  __device__ float3 random_float3_uniform(curandState* local_state, float mn, float mx) {
+inline  __device__ vec3 random_float3_uniform(curandState* local_state, float mn, float mx) {
     float c = mn + (mx - mn);
     float x = c * curand_uniform(local_state);
     float y = c * curand_uniform(local_state);
     float z = c * curand_uniform(local_state);
 
-    return make_float3(x, y, z);
+    return {x, y, z};
 }
 
-inline  __device__ float3 random_unit_vector(curandState* local_state) {
+inline  __device__ vec3 random_unit_vector(curandState* local_state) {
     // pretty expensive but it's better than rejection sampling
     float u = curand_uniform(local_state);
     float theta = 2.0f * PI * curand_uniform(local_state);
@@ -87,11 +89,11 @@ inline  __device__ float3 random_unit_vector(curandState* local_state) {
     float x = r * cosf(theta);
     float y = r * sinf(theta);
 
-    return make_float3(x, y, z);
+    return {x, y, z};
 }
 
-inline  __device__ float3 random_on_hemisphere(curandState* local_state, const float3 normal) {
-    float3 on_unit_sphere = random_unit_vector(local_state);
+inline  __device__ vec3 random_on_hemisphere(curandState* local_state, const vec3 normal) {
+    vec3 on_unit_sphere = random_unit_vector(local_state);
     if (dot(on_unit_sphere, normal) > 0.0) {
         return on_unit_sphere;
     } else {
@@ -99,7 +101,7 @@ inline  __device__ float3 random_on_hemisphere(curandState* local_state, const f
     }
 }
 
-inline  __device__ float3 reflect(float3 v, float3 n) {
+inline  __device__ vec3 reflect(vec3 v, vec3 n) {
     return v - 2.0f * dot(v, n) * n;
 }
 
@@ -111,3 +113,5 @@ inline __device__ float4 mmul(const float M[4][4], const float4& v) {
     r.w = M[3][0] * v.x + M[3][1] * v.y + M[3][2] * v.z + M[3][3] * v.w;
     return r;
 }
+
+#endif // MATH_CUH_
