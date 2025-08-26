@@ -6,10 +6,12 @@ const al = @import("math.zig");
 const Camera = @import("Camera.zig");
 const mat = @import("material.zig");
 
-extern fn init_cuda(cam: *const CameraData, spheres_count: usize) void;
+extern fn init_cuda(cam: *const CameraData, spheres_count: usize, seed: i32) void;
 extern fn update_spheres(spheres: [*]const Sphere, spheres_count: usize) void;
 extern fn launch_raycast(img: [*]u8, cam: *const CameraData, spheres: [*]const Sphere, spheres_count: usize) void;
 extern fn cleanup_cuda() void;
+
+const RNG_SEED: i32 = 1234;
 
 const CameraData = extern struct {
     image_width: u32,
@@ -46,7 +48,7 @@ fn run_sim(shared: *SimSharedState) !void {
     const sim_dt = 1.0 / SIMULATION_FRAMERATE;
     var last = rl.GetTime();
 
-    init_cuda(&shared.cam, shared.spheres_count);
+    init_cuda(&shared.cam, shared.spheres_count, RNG_SEED);
     defer cleanup_cuda();
 
     while (shared.running.load(.acquire)) {

@@ -6,8 +6,6 @@
 #include <curand_kernel.h>
 #include "math.cuh"
 
-#define RNG_SEED 1234
-
 typedef struct {
     float3 origin;
     float3 dir;
@@ -52,13 +50,13 @@ typedef struct {
 } CameraData;
 
 
-__global__ void setup_rng(curandState* state, int width, int height) {
+__global__ void setup_rng(curandState* state, int width, int height, int seed) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= width || y >= height) return;
 
     int idx = y * width + x;
-    curand_init(RNG_SEED, idx, 0, &state[idx]);
+    curand_init(seed, idx, 0, &state[idx]);
 }
 
 __device__ bool range_constains(float v, float min, float max) {
@@ -249,7 +247,7 @@ Sphere* d_spheres;
 unsigned char *d_img;
 curandState *d_rng_state;
 
-extern "C" void init_cuda(const CameraData *cam, size_t spheres_count) {
+extern "C" void init_cuda(const CameraData *cam, size_t spheres_count, int seed) {
     size_t img_size = cam->image_height * cam->image_width * 3U * sizeof(unsigned char);
     cudaMalloc((void**)&d_spheres, spheres_count * sizeof(Sphere));
     cudaMalloc((void**)&d_img, img_size);
@@ -260,7 +258,7 @@ extern "C" void init_cuda(const CameraData *cam, size_t spheres_count) {
     dim3 grid((cam->image_width + block.x - 1) / block.x,
                 (cam->image_height + block.y - 1) / block.y);
 
-    setup_rng<<<grid, block>>>(d_rng_state, cam->image_width, cam->image_height);
+    setup_rng<<<grid, block>>>(d_rng_state, cam->image_width, cam->image_height, seed);
 
     cudaDeviceSynchronize();
 }
