@@ -1,5 +1,8 @@
 // in lib.h
 
+#ifndef RAYCAST_H_
+#define RAYCAST_H_
+
 #include <stdlib.h>
 
 #if defined(__cplusplus)
@@ -48,3 +51,5 @@ EXTERN_C void init_cuda(const CameraData *cam, size_t spheres_count, int seed);
 EXTERN_C void update_spheres(const Sphere *spheres, size_t spheres_count);
 EXTERN_C void launch_raycast(unsigned char *img, const CameraData* cam, const Sphere* spheres, size_t spheres_count);
 EXTERN_C void cleanup_cuda(void);
+
+#endif // RAYCAST_H_

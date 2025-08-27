@@ -73,16 +73,30 @@ pub fn main() !void {
 
     var spheres = try gpa.alloc(rc.Sphere, 4);
     defer gpa.free(spheres);
-    const lambertian_mat = rc.Material{ .kind = rc.MAT_LAMBERTIAN, .albedo = .{ .x = 0.1, .y = 0.2, .z = 0.5 } };
-    const metal_mat = rc.Material{ .kind = rc.MAT_METAL, .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 }, .fuzz = 0.05 };
-    const ground_mat = rc.Material{ .kind = rc.MAT_LAMBERTIAN, .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 } };
-    const emit_mat = rc.Material{ .kind = rc.MAT_EMISSIVE, .emit = .{ .x = 1.0, .y = 1.0, .z = 1.0 } };
+
+    const lambertian_mat = rc.Material{
+        .kind = rc.MAT_LAMBERTIAN,
+        .albedo = .{ .x = 0.1, .y = 0.2, .z = 0.5 },
+    };
+    const metal_mat = rc.Material{
+        .kind = rc.MAT_METAL,
+        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
+        .fuzz = 0.05,
+    };
+    const ground_mat = rc.Material{
+        .kind = rc.MAT_LAMBERTIAN,
+        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
+    };
+    const emit_mat = rc.Material{
+        .kind = rc.MAT_EMISSIVE,
+        .emit = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
+    };
     spheres[0] = .{ .center = .{ .x = -0.8, .y = -0.15, .z = -0.8 }, .radius = 0.3, .material = lambertian_mat };
     spheres[1] = .{ .center = .{ .x = 0.0, .y = 0.0, .z = -1.2 }, .radius = 0.5, .material = emit_mat };
     spheres[2] = .{ .center = .{ .x = 0.8, .y = -0.15, .z = -0.8 }, .radius = 0.3, .material = metal_mat };
     spheres[3] = .{ .center = .{ .x = 0.0, .y = -100.5, .z = -1.0 }, .radius = 100.0, .material = ground_mat };
 
-    rl.InitWindow(@as(i32, @intCast(image_width)), @as(i32, @intCast(image_height)), "Sim/Render decoupled");
+    rl.InitWindow(@as(i32, @intCast(image_width)), @as(i32, @intCast(image_height)), "Raytracing demo");
     defer rl.CloseWindow();
 
     const image = rl.Image{
@@ -96,6 +110,12 @@ pub fn main() !void {
     const texture = rl.LoadTextureFromImage(image);
     defer rl.UnloadTexture(texture);
 
+    const camera = Camera.init(
+        .{0.0, 0.0, 0.0},
+        .{0.0, 0.0, -1.0},
+        .{0.0, 1.0, 0.0},
+    );
+
     var shared = SimSharedState{
         .buffers = .{ img0, img1 },
         .ready_idx = AtomicUsize.init(0),
@@ -106,12 +126,7 @@ pub fn main() !void {
             .focal_length = 1.0,
             .samples_per_pixel = 32,
             .max_depth = 10,
-            .camera_to_world = [4][4]f32{
-                .{ 1, 0, 0, 0 },
-                .{ 0, 1, 0, 0 },
-                .{ 0, 0, 1, 0 },
-                .{ 0, 0, 0, 1 },
-            },
+            .camera_to_world = camera.camera_to_world(),
         },
         .spheres = spheres.ptr,
         .spheres_count = spheres.len,
