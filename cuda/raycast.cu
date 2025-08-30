@@ -1,3 +1,4 @@
+#include "stdio.h"
 #include "assert.h"
 #include "raycast.h"
 #include <cmath>
@@ -7,6 +8,16 @@
 
 #include <curand.h>
 #include <curand_kernel.h>
+
+#define CHECK_CUDA(call)                                                         \
+    do {                                                                         \
+        cudaError_t err = call;                                                  \
+        if (err != cudaSuccess) {                                                \
+            fprintf(stderr, "CUDA Error: %s (error code %d) in %s at line %d\n", \
+                    cudaGetErrorString(err), err, __FILE__, __LINE__);           \
+            exit(EXIT_FAILURE);                                                  \
+        }                                                                        \
+    } while (0)
 
 typedef struct {
     vec3 origin;
@@ -225,12 +236,12 @@ EXTERN_C VertexBuffer* vb_alloc(size_t count) {
     assert(vb != NULL);
 
     // Allocate device memory for the buffers
-    cudaMalloc((void**)&vb->p_buf, count * sizeof(vec3));
-    cudaMalloc((void**)&vb->c_buf, count * sizeof(vec3));
-    cudaMalloc((void**)&vb->n_buf, count * sizeof(vec3));
+    CHECK_CUDA(cudaMalloc((void**)&vb->p_buf, count * sizeof(vec3)));
+    CHECK_CUDA(cudaMalloc((void**)&vb->c_buf, count * sizeof(vec3)));
+    CHECK_CUDA(cudaMalloc((void**)&vb->n_buf, count * sizeof(vec3)));
     vb->count = count;
 
-    cudaDeviceSynchronize();
+    CHECK_CUDA(cudaDeviceSynchronize());
 
     return vb;
 }
@@ -238,32 +249,32 @@ EXTERN_C VertexBuffer* vb_alloc(size_t count) {
 EXTERN_C void vb_free(VertexBuffer *vb) {
     assert(vb != NULL);
 
-    cudaFree(vb->p_buf);
-    cudaFree(vb->c_buf);
-    cudaFree(vb->n_buf);
-    cudaDeviceSynchronize();
+    CHECK_CUDA(cudaFree(vb->p_buf));
+    CHECK_CUDA(cudaFree(vb->c_buf));
+    CHECK_CUDA(cudaFree(vb->n_buf));
+    CHECK_CUDA(cudaDeviceSynchronize());
 
     free(vb);
 }
 
 EXTERN_C void init_cuda(const CameraData *cam, size_t spheres_count, int seed) {
     size_t img_size = cam->image_height * cam->image_width * 3U * sizeof(unsigned char);
-    cudaMalloc((void**)&d_spheres, spheres_count * sizeof(Sphere));
-    cudaMalloc((void**)&d_img, img_size);
+    CHECK_CUDA(cudaMalloc((void**)&d_spheres, spheres_count * sizeof(Sphere)));
+    CHECK_CUDA(cudaMalloc((void**)&d_img, img_size));
 
-    cudaMalloc(&d_rng_state, cam->image_height * cam->image_width * sizeof(curandState));
+    CHECK_CUDA(cudaMalloc(&d_rng_state, cam->image_height * cam->image_width * sizeof(curandState)));
 
     dim3 block(16, 16);
     dim3 grid((cam->image_width + block.x - 1) / block.x,
                 (cam->image_height + block.y - 1) / block.y);
 
     setup_rng<<<grid, block>>>(d_rng_state, cam->image_width, cam->image_height, seed);
-
-    cudaDeviceSynchronize();
+    CHECK_CUDA(cudaPeekAtLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 EXTERN_C void update_spheres(const Sphere *spheres, size_t spheres_count) {
-    cudaMemcpy(d_spheres, spheres, spheres_count * sizeof(spheres[0]), cudaMemcpyHostToDevice);
+    CHECK_CUDA(cudaMemcpy(d_spheres, spheres, spheres_count * sizeof(spheres[0]), cudaMemcpyHostToDevice));
 }
 
 EXTERN_C void launch_raycast(unsigned char *img, const CameraData* cam, const Sphere* spheres, size_t spheres_count) {
@@ -273,13 +284,13 @@ EXTERN_C void launch_raycast(unsigned char *img, const CameraData* cam, const Sp
                 (cam->image_height + block.y - 1) / block.y);
 
     render_kernel<<<grid, block>>>(d_img, cam, d_spheres, spheres_count, d_rng_state);
-
-    cudaMemcpy(img, d_img, img_size, cudaMemcpyDeviceToHost);
-    cudaDeviceSynchronize();
+    CHECK_CUDA(cudaPeekAtLastError());
+    CHECK_CUDA(cudaMemcpy(img, d_img, img_size, cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 EXTERN_C void cleanup_cuda(void) {
-    cudaFree(d_img);
-    cudaFree(d_rng_state);
-    cudaFree(d_spheres);
+    CHECK_CUDA(cudaFree(d_img));
+    CHECK_CUDA(cudaFree(d_rng_state));
+    CHECK_CUDA(cudaFree(d_spheres));
 }
