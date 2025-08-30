@@ -24,6 +24,38 @@ const SimSharedState = struct {
 const SIMULATION_FRAMERATE: f32 = 30.0;
 const RENDERING_FRAMERATE: f32 = 60.0;
 
+const VertexBuffer = struct {
+    const Buf = std.ArrayList(al.Vec3);
+    // struct of arrays over array of structs
+    p_buf: std.ArrayList(al.Vec3),
+    n_buf: std.ArrayList(al.Vec3),
+    c_buf: std.ArrayList(al.Vec3),
+
+    count: usize,
+
+    fn init(allocator: std.mem.Allocator) !VertexBuffer {
+        return VertexBuffer {
+            .p_buf = Buf.init(allocator),
+            .n_buf = Buf.init(allocator),
+            .c_buf = Buf.init(allocator),
+            .count = 0,
+        };
+    }
+
+    fn deinit(self: *VertexBuffer) void {
+        self.p_buf.deinit();
+        self.c_buf.deinit();
+        self.n_buf.deinit();
+    }
+
+    fn push_vertex(self: *VertexBuffer, p: al.Vec3, n: al.Vec3, c: al.Vec3) !void {
+        try self.p_buf.append(p);
+        try self.c_buf.append(c);
+        try self.n_buf.append(n);
+        self.count += 1;
+    }
+};
+
 fn run_sim(shared: *SimSharedState) !void {
     var frame: f32 = 0.0;
     const sim_dt = 1.0 / SIMULATION_FRAMERATE;
@@ -70,6 +102,15 @@ pub fn main() !void {
     defer gpa.free(img0);
     const img1 = try gpa.alloc(u8, buf_size);
     defer gpa.free(img1);
+
+    var vb = try VertexBuffer.init(gpa);
+    defer vb.deinit();
+    try vb.push_vertex(.{1.0, 1.0, 1.0}, .{0.0, 0.0, 0.0}, .{1.0, 0.0, 0.0});
+    try vb.push_vertex(.{-1.0, -1.0, 1.0}, .{0.0, 0.0, 0.0}, .{0.0, 1.0, 0.0});
+    try vb.push_vertex(.{1.0, -1.0, 1.0}, .{0.0, 0.0, 0.0}, .{0.0, 0.0, 1.0});
+
+    const d_vb = rc.vb_alloc(vb.count);
+    defer rc.vb_free(d_vb);
 
     var spheres = try gpa.alloc(rc.Sphere, 4);
     defer gpa.free(spheres);

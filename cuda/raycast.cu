@@ -1,3 +1,4 @@
+#include "assert.h"
 #include "raycast.h"
 #include <cmath>
 #include <cuda_runtime.h>
@@ -216,6 +217,34 @@ __global__ void render_kernel(unsigned char* img, const CameraData* cam, const S
 Sphere* d_spheres;
 unsigned char *d_img;
 curandState *d_rng_state;
+
+
+EXTERN_C VertexBuffer* vb_alloc(size_t count) {
+    // Allocate the struct on the host heap
+    VertexBuffer *vb = (VertexBuffer*)malloc(sizeof(VertexBuffer));
+    assert(vb != NULL);
+
+    // Allocate device memory for the buffers
+    cudaMalloc((void**)&vb->p_buf, count * sizeof(vec3));
+    cudaMalloc((void**)&vb->c_buf, count * sizeof(vec3));
+    cudaMalloc((void**)&vb->n_buf, count * sizeof(vec3));
+    vb->count = count;
+
+    cudaDeviceSynchronize();
+
+    return vb;
+}
+
+EXTERN_C void vb_free(VertexBuffer *vb) {
+    assert(vb != NULL);
+
+    cudaFree(vb->p_buf);
+    cudaFree(vb->c_buf);
+    cudaFree(vb->n_buf);
+    cudaDeviceSynchronize();
+
+    free(vb);
+}
 
 EXTERN_C void init_cuda(const CameraData *cam, size_t spheres_count, int seed) {
     size_t img_size = cam->image_height * cam->image_width * 3U * sizeof(unsigned char);

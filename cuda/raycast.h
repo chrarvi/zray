@@ -47,6 +47,18 @@ typedef struct {
     Material material;
 } Sphere;
 
+typedef struct {
+    vec3* p_buf;
+    vec3* n_buf;
+    vec3* c_buf;
+
+    size_t count;
+} VertexBuffer;
+
+// VB
+EXTERN_C VertexBuffer *vb_alloc(size_t count);
+EXTERN_C void vb_free(VertexBuffer* vb);
+
 EXTERN_C void init_cuda(const CameraData *cam, size_t spheres_count, int seed);
 EXTERN_C void update_spheres(const Sphere *spheres, size_t spheres_count);
 EXTERN_C void launch_raycast(unsigned char *img, const CameraData* cam, const Sphere* spheres, size_t spheres_count);
