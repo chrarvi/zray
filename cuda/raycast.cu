@@ -374,8 +374,6 @@ __global__ void render_kernel_vb(unsigned char* img, const CameraData* cam, cons
     img[idx+2] = (unsigned char)(255.0f * clamp(b, 0.0f, 0.999f));
 }
 
-Sphere* d_spheres;
-unsigned char *d_img;
 curandState *d_rng_state;
 
 
@@ -406,11 +404,7 @@ EXTERN_C void vb_free(VertexBuffer *vb) {
     free(vb);
 }
 
-EXTERN_C void init_cuda(const CameraData *cam, size_t spheres_count, int seed) {
-    size_t img_size = cam->image_height * cam->image_width * 3U * sizeof(unsigned char);
-    CHECK_CUDA(cudaMalloc((void**)&d_spheres, spheres_count * sizeof(Sphere)));
-    CHECK_CUDA(cudaMalloc((void**)&d_img, img_size));
-
+EXTERN_C void rng_init(const CameraData *cam, int seed) {
     CHECK_CUDA(cudaMalloc(&d_rng_state, cam->image_height * cam->image_width * sizeof(curandState)));
 
     dim3 block(16, 16);
@@ -422,52 +416,25 @@ EXTERN_C void init_cuda(const CameraData *cam, size_t spheres_count, int seed) {
     CHECK_CUDA(cudaDeviceSynchronize());
 }
 
-EXTERN_C void update_spheres(const Sphere *spheres, size_t spheres_count) {
-    CHECK_CUDA(cudaMemcpy(d_spheres, spheres, spheres_count * sizeof(spheres[0]), cudaMemcpyHostToDevice));
-}
-
-EXTERN_C void launch_raycast(unsigned char *img, const CameraData* cam, const Sphere* spheres, size_t spheres_count) {
-    size_t img_size = cam->image_height * cam->image_width * 3U * sizeof(unsigned char);
+EXTERN_C void launch_raycast(unsigned char *d_img, const CameraData* cam, const Sphere* d_spheres, size_t spheres_count) {
     dim3 block(16, 16);
     dim3 grid((cam->image_width + block.x - 1) / block.x,
                 (cam->image_height + block.y - 1) / block.y);
 
     render_kernel<<<grid, block>>>(d_img, cam, d_spheres, spheres_count, d_rng_state);
     CHECK_CUDA(cudaPeekAtLastError());
-    CHECK_CUDA(cudaMemcpy(img, d_img, img_size, cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
-EXTERN_C void vb_render(unsigned char *img, const CameraData *cam,
+EXTERN_C void vb_render(unsigned char *d_img, const CameraData *cam,
                         VertexBuffer const* d_vb) {
-    size_t img_size = cam->image_height * cam->image_width * 3U * sizeof(unsigned char);
     dim3 block(16, 16);
     dim3 grid((cam->image_width + block.x - 1) / block.x,
                 (cam->image_height + block.y - 1) / block.y);
 
     render_kernel_vb<<<grid, block>>>(d_img, cam, d_vb, d_rng_state);
-
     CHECK_CUDA(cudaPeekAtLastError());
-    CHECK_CUDA(cudaMemcpy(img, d_img, img_size, cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
-EXTERN_C void cleanup_cuda(void) {
-    CHECK_CUDA(cudaFree(d_img));
+EXTERN_C void rng_deinit(void) {
     CHECK_CUDA(cudaFree(d_rng_state));
-    CHECK_CUDA(cudaFree(d_spheres));
-}
-
-
-__global__ void add_kernel(float const *a, float const *b, float *out, size_t count) {
-    const int t = blockIdx.x * blockDim.x + threadIdx.x;
-    if (t >= count) return;
-    out[t] = a[t] + b[t];
-
-}
-EXTERN_C void add(float const* a, float const* b, float* out, size_t count) {
-    dim3 block(16);
-    dim3 grid((count + block.x - 1) / block.x);
-
-    add_kernel<<<grid, block>>>(a, b, out, count);
 }

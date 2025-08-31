@@ -38,8 +38,10 @@ pub fn CudaBuffer(comptime ValueT: type) type {
             return buf;
         }
 
-        pub fn deinit(self: *Self) !void {
-            try checkCuda(cudaFree(@as(*anyopaque, @ptrCast(self.dev_ptr))));
+        pub fn deinit(self: *Self) void {
+            checkCuda(cudaFree(@as(*anyopaque, @ptrCast(self.dev_ptr)))) catch |err| {
+                std.debug.panic("Unable to free cuda memory, likely double free: {}", .{err});
+            };
             self.dev_ptr = null;
             self.len = 0;
         }
