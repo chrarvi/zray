@@ -58,10 +58,12 @@ typedef struct {
 // VB
 EXTERN_C VertexBuffer *vb_alloc(size_t count);
 EXTERN_C void vb_free(VertexBuffer* vb);
+EXTERN_C void vb_render(unsigned char *img, const CameraData *cam, VertexBuffer const* d_vb);
 
 EXTERN_C void init_cuda(const CameraData *cam, size_t spheres_count, int seed);
 EXTERN_C void update_spheres(const Sphere *spheres, size_t spheres_count);
 EXTERN_C void launch_raycast(unsigned char *img, const CameraData* cam, const Sphere* spheres, size_t spheres_count);
 EXTERN_C void cleanup_cuda(void);
 
+EXTERN_C void add(float const* a, float const* b, float* out, size_t count);
 #endif // RAYCAST_H_
