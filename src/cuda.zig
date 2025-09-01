@@ -119,3 +119,27 @@ pub fn CudaBuffer(comptime ValueT: type) type {
         }
     };
 }
+
+test "CudaBuffer can copy data from host" {
+    var a_host: [10 * 10]f32 = undefined;
+    @memset(&a_host, 2);
+    var a = try CudaBuffer(f32).init(10 * 10);
+    defer a.deinit();
+    try a.fromHost(&a_host);
+
+    var a_back: [10 * 10]f32 = undefined;
+    try a.toHost(&a_back);
+
+    for (a_back) |v| {
+        try std.testing.expect(v == 2);
+    }
+}
+
+test "TensorView shape initialization works" {
+    var a = try CudaBuffer(f32).init(10 * 10);
+    defer a.deinit();
+    const a_view = a.view(2, .{10, 10});
+
+    try std.testing.expect(a_view.shape[0] == 10);
+    try std.testing.expect(a_view.shape[1] == 10);
+}
