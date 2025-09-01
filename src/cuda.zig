@@ -82,6 +82,7 @@ pub fn CudaBuffer(comptime ValueT: type) type {
             const size_bytes = @sizeOf(ValueT) * len;
             var raw: ?*anyopaque = null;
             try checkCuda(cudaMalloc(&raw, size_bytes));
+
             buf.dev_ptr = @as([*c]ValueT, @ptrCast(@alignCast(raw.?)));
 
             return buf;

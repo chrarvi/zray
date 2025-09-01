@@ -14,11 +14,10 @@ __global__ void __add_kernel(TensorView<ValueT, 2> a, TensorView<ValueT, 2> b, T
 
     if (y >= a.shape[0] || x >= a.shape[1]) return;
 
-    c.at(y, x) = a.at(y, x) + b.at(y, x);  // correct
+    c.at(y, x) = a.at(y, x) + b.at(y, x);
 }
 
 EXTERN_C void add_f32_2d(TensorView<float, 2> a, TensorView<float, 2> b, TensorView<float, 2> c) {
-    // Convert to templated struct
     dim3 block(16, 16);
     dim3 grid((a.shape[1] + block.x - 1) / block.x,
               (a.shape[0] + block.y - 1) / block.y);
@@ -28,7 +27,6 @@ EXTERN_C void add_f32_2d(TensorView<float, 2> a, TensorView<float, 2> b, TensorV
 }
 
 EXTERN_C void add_i32_2d(TensorView<int, 2> a, TensorView<int, 2> b, TensorView<int, 2> c) {
-    // Convert to templated struct
     dim3 block(16, 16);
     dim3 grid((a.shape[1] + block.x - 1) / block.x,
               (a.shape[0] + block.y - 1) / block.y);
