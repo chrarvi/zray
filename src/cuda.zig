@@ -52,8 +52,10 @@ pub fn TensorView(comptime ValueT: type, comptime Rank: usize) type {
 
 pub fn TensorDims(comptime Rank: usize) type {
     return struct {
+        const Self = @This();
         dims: [Rank]usize,
         strides: [Rank]usize,
+        rank: usize = Rank,
 
         pub fn init(dims: [Rank]usize) @This() {
             var strides: [Rank]usize = undefined;
@@ -63,6 +65,12 @@ pub fn TensorDims(comptime Rank: usize) type {
                 strides[i-1] = strides[i] * dims[i];
             }
             return .{ .dims = dims, .strides = strides };
+        }
+
+        pub fn size(self: *const Self) usize {
+            var sz: usize = 1;
+            for (self.dims) |dim| {sz *= dim;}
+            return sz;
         }
     };
 }
@@ -115,8 +123,29 @@ pub fn CudaBuffer(comptime ValueT: type) type {
                 cudaMemcpyDeviceToHost,
             ));
         }
-        pub fn view(self: *const Self, comptime Rank: usize, shape: [Rank]usize) TensorView(ValueT, Rank) {
-            return TensorView(ValueT, Rank).init(self, shape);
+        pub fn view(self: *const Self, comptime Rank: usize, dims: [Rank]usize) !TensorView(ValueT, Rank) {
+            const _dims = TensorDims(Rank).init(dims);
+            if (_dims.size() != self.len) {
+                return error.InvalidViewDimensions;
+            }
+            return TensorView(ValueT, Rank).init(self, dims);
+        }
+    };
+}
+
+pub fn Tensor(comptime ValueT: type) type {
+    return struct {
+        const Self = @This();
+
+        buf: CudaBuffer(ValueT),
+        dims: TensorDims,
+
+        pub fn init(dims: TensorDims) !Self {
+            const size = dims.size();
+            return .{
+                .buf = try CudaBuffer(ValueT).init(size),
+                .dims = dims,
+            };
         }
     };
 }
@@ -139,8 +168,15 @@ test "CudaBuffer can copy data from host" {
 test "TensorView shape initialization works" {
     var a = try CudaBuffer(f32).init(10 * 10);
     defer a.deinit();
-    const a_view = a.view(2, .{10, 10});
+    const a_view = try a.view(2, .{10, 10});
 
     try std.testing.expect(a_view.shape[0] == 10);
     try std.testing.expect(a_view.shape[1] == 10);
+}
+
+test "TensorView invalid view dimensions" {
+    var a = try CudaBuffer(f32).init(10 * 10);
+    defer a.deinit();
+    try std.testing.expectError(error.InvalidViewDimensions, a.view(2, .{9, 10}));
+    try std.testing.expectError(error.InvalidViewDimensions, a.view(3, .{3, 3, 3}));
 }

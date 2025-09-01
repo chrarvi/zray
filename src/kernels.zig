@@ -22,9 +22,9 @@ test "add_f32_2d kernel computes correctly" {
     var c = try cu.CudaBuffer(f32).init(10 * 10);
     defer c.deinit();
 
-    const a_view = a.view(2, .{10, 10});
-    const b_view = b.view(2, .{10, 10});
-    const c_view = c.view(2, .{10, 10});
+    const a_view = try a.view(2, .{10, 10});
+    const b_view = try b.view(2, .{10, 10});
+    const c_view = try c.view(2, .{10, 10});
 
     // Call kernel twice like your main
     add_f32_2d(a_view, b_view, c_view);
