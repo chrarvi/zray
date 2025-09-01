@@ -1,5 +1,13 @@
 const std = @import("std");
 
+pub fn compile_cuda(b: *std.Build, exe: *std.Build.Step.Compile, cuda_file: []const u8, obj_file: []const u8) void {
+    const cuda_gen_step = b.addSystemCommand(&.{
+        "nvcc", "-Xcompiler", "-fPIC", "-c", "-o", obj_file, cuda_file,
+    });
+    exe.step.dependOn(&cuda_gen_step.step);
+    exe.addObjectFile(b.path(obj_file));
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -37,11 +45,9 @@ pub fn build(b: *std.Build) void {
 
     exe.linkLibC();
 
-    const cuda_gen_step = b.addSystemCommand(&.{
-        "nvcc", "-Xcompiler", "-fPIC", "-c", "-o", "build/libraycast.o", "cuda/raycast.cu",
-    });
-    exe.step.dependOn(&cuda_gen_step.step);
-    exe.addObjectFile(b.path("build/libraycast.o"));
+    compile_cuda(b, exe, "cuda/raycast.cu", "build/raycast.o");
+    compile_cuda(b, exe, "cuda/add.cu", "build/add.o");
+
     exe.addLibraryPath(.{
         .cwd_relative = "/opt/cuda/lib64/",
     });

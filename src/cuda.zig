@@ -20,21 +20,70 @@ pub extern fn cudaFree(ptr: *anyopaque) c_int;
 pub extern fn cudaMemcpy(dst: *anyopaque, src: *const anyopaque, size: usize, kind: c_int) c_int;
 pub extern fn cudaDeviceSynchronize() c_int;
 
+/// Generic view struct for tensors. This struct is shared with CUDA,
+/// who has a device side implementation for conveniently indexing these
+/// tensors.
+pub fn TensorView(comptime ValueT: type, comptime Rank: usize) type {
+    return extern struct {
+        const Self = @This();
+
+        data: [*c]ValueT,
+        shape: [Rank]usize,
+        strides: [Rank]usize,
+
+        pub fn init(buf: *const CudaBuffer(ValueT), shape: [Rank]usize) Self {
+            const td = TensorDims(Rank).init(shape);
+            return .{
+                .data = buf.dev_ptr,
+                .shape = td.dims,
+                .strides = td.strides,
+            };
+        }
+
+        pub fn at(self: *const Self, idx: [Rank]usize) *ValueT {
+            var offset: usize = 0;
+            inline for (0..Rank) |i| {
+                offset += idx[i] * self.strides[i];
+            }
+            return self.data + offset;
+        }
+    };
+}
+
+pub fn TensorDims(comptime Rank: usize) type {
+    return struct {
+        dims: [Rank]usize,
+        strides: [Rank]usize,
+
+        pub fn init(dims: [Rank]usize) @This() {
+            var strides: [Rank]usize = undefined;
+            strides[Rank-1] = 1;
+            var i = Rank - 1;
+            while (i > 0) : (i -= 1) {
+                strides[i-1] = strides[i] * dims[i];
+            }
+            return .{ .dims = dims, .strides = strides };
+        }
+    };
+}
+
 pub fn CudaBuffer(comptime ValueT: type) type {
-    const BufferT = [*c]ValueT;
     return struct {
         const Self = @This();
+        const BufferT = [*c]ValueT;
+
         dev_ptr: BufferT = null,
         len: usize = 0,
 
         pub fn init(len: usize) !Self {
             var buf = Self{};
-            var raw: ?*anyopaque = null;
-            const size_bytes = @sizeOf(ValueT) * len;
+            buf.len = len;
 
+            const size_bytes = @sizeOf(ValueT) * len;
+            var raw: ?*anyopaque = null;
             try checkCuda(cudaMalloc(&raw, size_bytes));
             buf.dev_ptr = @as([*c]ValueT, @ptrCast(@alignCast(raw.?)));
-            buf.len = len;
+
             return buf;
         }
 
@@ -47,9 +96,7 @@ pub fn CudaBuffer(comptime ValueT: type) type {
         }
 
         pub fn fromHost(self: *Self, src: []const ValueT) !void {
-            if (src.len > self.len) {
-                return error.BufferOverflow;
-            }
+            if (src.len != self.len) return error.BufferSizeMismatch;
             try checkCuda(cudaMemcpy(
                 self.dev_ptr,
                 src.ptr,
@@ -57,16 +104,18 @@ pub fn CudaBuffer(comptime ValueT: type) type {
                 cudaMemcpyHostToDevice,
             ));
         }
+
         pub fn toHost(self: *const Self, dst: []ValueT) !void {
-            if (dst.len > self.len) {
-                return error.BufferOverflow;
-            }
+            if (dst.len != self.len) return error.BufferSizeMismatch;
             try checkCuda(cudaMemcpy(
                 @as(*anyopaque, @ptrCast(dst.ptr)),
                 @as(*anyopaque, @ptrCast(self.dev_ptr)),
                 self.len * @sizeOf(ValueT),
                 cudaMemcpyDeviceToHost,
             ));
+        }
+        pub fn view(self: *const Self, comptime Rank: usize, shape: [Rank]usize) TensorView(ValueT, Rank) {
+            return TensorView(ValueT, Rank).init(self, shape);
         }
     };
 }
