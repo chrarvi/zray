@@ -4,6 +4,8 @@ const rl = @import("raylib");
 const al = @import("math.zig");
 const cu = @import("cuda.zig");
 
+const vb = @import("vb.zig");
+
 const Camera = @import("Camera.zig");
 
 const rc = @cImport(@cInclude("raycast.h"));
@@ -13,12 +15,36 @@ const RNG_SEED: i32 = 1234;
 const AtomicUsize = std.atomic.Value(usize);
 const AtomicBool = std.atomic.Value(bool);
 
+const World = struct {
+    spheres_host: std.ArrayList(rc.Sphere),
+    spheres_dev: cu.CudaBuffer(rc.Sphere),
+    vb_host: vb.HostVertexBuffer,
+    vb_dev: vb.DeviceVertexBuffer,
+
+    fn init(allocator: std.mem.Allocator, spheres_capacity: usize, vertex_capacity: usize) !World {
+        return .{
+            .spheres_host = std.ArrayList(rc.Sphere).init(allocator),
+            .spheres_dev = try cu.CudaBuffer(rc.Sphere).init(spheres_capacity),
+            .vb_host = vb.HostVertexBuffer.init(allocator),
+            .vb_dev = try vb.DeviceVertexBuffer.init(vertex_capacity),
+        };
+    }
+
+    fn deinit(self: *World) void {
+        self.spheres_host.deinit();
+        self.spheres_dev.deinit();
+        self.vb_host.deinit();
+        self.vb_dev.deinit();
+    }
+};
+
 const SimSharedState = struct {
-    frame_buffers: [2][]u8, // double-buffering
+    frame_buffers_host: [2][]u8, // double-buffering
+    frame_buffer_dev: cu.CudaBuffer(u8),
     ready_idx: AtomicUsize, // which buffer is ready for display
     running: AtomicBool, // shutdown flag
     cam: rc.CameraData,
-    spheres: std.ArrayList(rc.Sphere),
+    world: World,
 };
 
 const SIMULATION_FRAMERATE: f32 = 30.0;
@@ -27,16 +53,11 @@ const RENDERING_FRAMERATE: f32 = 60.0;
 pub extern fn launch_raycast(d_img: cu.TensorView(u8, 3), cam: *rc.CameraData, d_spheres: cu.TensorView(rc.Sphere, 1)) void;
 
 fn run_sim(shared: *SimSharedState) !void {
+    try fill_world(&shared.world);
+
     var frame: f32 = 0.0;
     const sim_dt = 1.0 / SIMULATION_FRAMERATE;
     var last = rl.GetTime();
-
-    var spheres_dev = try cu.CudaBuffer(rc.Sphere).init(shared.spheres.items.len);
-    defer spheres_dev.deinit();
-
-    const img_size = shared.cam.image_height * shared.cam.image_width * 3 * @sizeOf(u8);
-    var img_dev = try cu.CudaBuffer(u8).init(img_size);
-    defer img_dev.deinit();
 
     rc.rng_init(shared.cam.image_height, shared.cam.image_width, RNG_SEED);
     defer rc.rng_deinit();
@@ -50,16 +71,16 @@ fn run_sim(shared: *SimSharedState) !void {
         last = now;
 
         const t = frame * 0.03;
-        shared.spheres.items[0].center.x = -0.8 + 0.3 * @sin(t);
-        shared.spheres.items[1].center.y = 0.0 + 0.2 * @sin(t * 1.5);
-        shared.spheres.items[2].center.x = 0.8 + 0.3 * @sin(t * 0.8);
+        shared.world.spheres_host.items[0].center.x = -0.8 + 0.3 * @sin(t);
+        shared.world.spheres_host.items[1].center.y = 0.0 + 0.2 * @sin(t * 1.5);
+        shared.world.spheres_host.items[2].center.x = 0.8 + 0.3 * @sin(t * 0.8);
 
         const current_ready = shared.ready_idx.load(.acquire);
         const write_idx: usize = 1 - current_ready;
 
-        try spheres_dev.fromHost(shared.spheres.items);
-        launch_raycast(try img_dev.view(3, .{shared.cam.image_height, shared.cam.image_width, 3}), &shared.cam, try spheres_dev.view(1, .{spheres_dev.len}));
-        try img_dev.toHost(shared.frame_buffers[write_idx]);
+        try shared.world.spheres_dev.fromHost(shared.world.spheres_host.items);
+        launch_raycast(try shared.frame_buffer_dev.view(3, .{shared.cam.image_height, shared.cam.image_width, 3}), &shared.cam, try shared.world.spheres_dev.view(1, .{shared.world.spheres_dev.len}));
+        try shared.frame_buffer_dev.toHost(shared.frame_buffers_host[write_idx]);
 
         shared.ready_idx.store(write_idx, .release);
 
@@ -67,23 +88,7 @@ fn run_sim(shared: *SimSharedState) !void {
     }
 }
 
-pub fn main() !void {
-    var gpa = std.heap.page_allocator;
-
-    const aspect_ratio = 16.0 / 9.0;
-    const image_width: u32 = 600;
-    const image_height: u32 = @intFromFloat(@max(@divFloor(@as(f32, @floatFromInt(image_width)), aspect_ratio), 1));
-
-    // double-buffering
-    const buf_size = image_width * image_height * 3;
-    const img_host0 = try gpa.alloc(u8, buf_size);
-    defer gpa.free(img_host0);
-    const img_host1 = try gpa.alloc(u8, buf_size);
-    defer gpa.free(img_host1);
-
-    var spheres_host = std.ArrayList(rc.Sphere).init(gpa);
-    defer spheres_host.deinit();
-
+pub fn fill_world(world: *World) !void {
     const lambertian_mat = rc.Material{
         .kind = rc.MAT_LAMBERTIAN,
         .albedo = .{ .x = 0.1, .y = 0.2, .z = 0.5 },
@@ -101,10 +106,25 @@ pub fn main() !void {
         .kind = rc.MAT_EMISSIVE,
         .emit = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
     };
-    try spheres_host.append(.{ .center = .{ .x = -0.8, .y = -0.15, .z = -0.8 }, .radius = 0.3, .material = lambertian_mat });
-    try spheres_host.append(.{ .center = .{ .x = 0.0, .y = 0.0, .z = -1.2 }, .radius = 0.5, .material = emit_mat });
-    try spheres_host.append(.{ .center = .{ .x = 0.8, .y = -0.15, .z = -0.8 }, .radius = 0.3, .material = metal_mat });
-    try spheres_host.append(.{ .center = .{ .x = 0.0, .y = -100.5, .z = -1.0 }, .radius = 100.0, .material = ground_mat });
+    try world.spheres_host.append(.{ .center = .{ .x = -0.8, .y = -0.15, .z = -0.8 }, .radius = 0.3, .material = lambertian_mat });
+    try world.spheres_host.append(.{ .center = .{ .x = 0.0, .y = 0.0, .z = -1.2 }, .radius = 0.5, .material = emit_mat });
+    try world.spheres_host.append(.{ .center = .{ .x = 0.8, .y = -0.15, .z = -0.8 }, .radius = 0.3, .material = metal_mat });
+    try world.spheres_host.append(.{ .center = .{ .x = 0.0, .y = -100.5, .z = -1.0 }, .radius = 100.0, .material = ground_mat });
+}
+
+pub fn main() !void {
+    var gpa = std.heap.page_allocator;
+
+    const aspect_ratio = 16.0 / 9.0;
+    const image_width: u32 = 600;
+    const image_height: u32 = @intFromFloat(@max(@divFloor(@as(f32, @floatFromInt(image_width)), aspect_ratio), 1));
+
+    // double-buffering
+    const buf_size = image_width * image_height * 3;
+    const img_host0 = try gpa.alloc(u8, buf_size);
+    defer gpa.free(img_host0);
+    const img_host1 = try gpa.alloc(u8, buf_size);
+    defer gpa.free(img_host1);
 
     rl.InitWindow(@as(i32, @intCast(image_width)), @as(i32, @intCast(image_height)), "Raytracing demo");
     defer rl.CloseWindow();
@@ -127,7 +147,11 @@ pub fn main() !void {
     );
 
     var shared = SimSharedState{
-        .frame_buffers = .{ img_host0, img_host1 },
+        .frame_buffers_host = .{
+            img_host0,
+            img_host1
+        },
+        .frame_buffer_dev = try cu.CudaBuffer(u8).init(buf_size),
         .ready_idx = AtomicUsize.init(0),
         .running = AtomicBool.init(true),
         .cam = rc.CameraData{
@@ -138,8 +162,11 @@ pub fn main() !void {
             .max_depth = 10,
             .camera_to_world = camera.camera_to_world(),
         },
-        .spheres = spheres_host,
+        .world = try World.init(gpa, 4, 4),
     };
+    defer shared.world.deinit();
+    defer shared.frame_buffer_dev.deinit();
+
     const sim_thread = try std.Thread.spawn(.{}, run_sim, .{&shared});
     defer sim_thread.join();
 
@@ -147,7 +174,7 @@ pub fn main() !void {
 
     while (!rl.WindowShouldClose()) {
         const idx = shared.ready_idx.load(.acquire);
-        const buf = shared.frame_buffers[idx];
+        const buf = shared.frame_buffers_host[idx];
 
         rl.UpdateTexture(texture, buf.ptr);
 
