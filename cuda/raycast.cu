@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 #include <math.h>
 #include "math.cuh"
+#include "tensor_view.cuh"
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -153,12 +154,12 @@ __device__ bool triangle_hit(
     return true;
 }
 
-__device__ bool spheres_hit(const Ray* ray, const Sphere *spheres, unsigned int spheres_count, float ray_tmin, float ray_tmax, HitRecord* hit_record) {
+__device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres, float ray_tmin, float ray_tmax, HitRecord* hit_record) {
     bool hit = false;
     float closest_so_far = ray_tmax;
-    for (size_t i = 0u; i < spheres_count; ++i) {
+    for (size_t i = 0u; i < d_spheres.shape[0]; ++i) {
         HitRecord temp_hit = {};
-        const Sphere* sphere = &spheres[i];
+        const Sphere* sphere = &d_spheres.at(i);
         bool _hit = sphere_hit(sphere, ray, ray_tmin, closest_so_far, &temp_hit);
         if (_hit) {
             hit = true;
@@ -204,14 +205,14 @@ __device__ vec3 sample_square(curandState *local_state) {
     return {x, y, z};
 }
 
-__device__ vec3 ray_color(const Ray& ray, int max_depth, const Sphere* spheres, unsigned int spheres_count, curandState* local_state) {
+__device__ vec3 ray_color(const Ray& ray, int max_depth, TensorView<Sphere, 1> d_spheres, curandState* local_state) {
     Ray current_ray = ray;
     vec3 attenuation = {1.0f, 1.0f, 1.0f};
     vec3 color = {0.0f, 0.0f, 0.0f};
 
     for (int depth = 0; depth < max_depth; ++depth) {
         HitRecord hit_record;
-        if (spheres_hit(&current_ray, spheres, spheres_count, 0.001f, INFINITY, &hit_record)) {
+        if (spheres_hit(&current_ray, d_spheres, 0.001f, INFINITY, &hit_record)) {
             bool scattered = false;
             Ray temp_ray = {current_ray.origin, current_ray.dir};
             switch (hit_record.material.kind) {
@@ -241,44 +242,7 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, const Sphere* spheres, 
     return color;
 }
 
-__device__ vec3 ray_color_vb(const Ray& ray, int max_depth, const VertexBuffer* d_vb, curandState* local_state) {
-    Ray current_ray = ray;
-    vec3 attenuation = {1.0f, 1.0f, 1.0f};
-    vec3 color = {0.0f, 0.0f, 0.0f};
-
-    for (int depth = 0; depth < max_depth; ++depth) {
-        HitRecord hit_record;
-        if (triangles_hit(&current_ray, d_vb, 0.001f, INFINITY, &hit_record)) {
-            bool scattered = false;
-            Ray temp_ray = {current_ray.origin, current_ray.dir};
-            switch (hit_record.material.kind) {
-            case MAT_LAMBERTIAN:
-                scattered = scatter_lambertian(&current_ray, &hit_record, local_state, &attenuation, &temp_ray);
-                break;
-            case MAT_METAL:
-                scattered = scatter_metal(&current_ray, &hit_record, local_state, &attenuation, &temp_ray);
-                break;
-            case MAT_EMISSIVE:
-                return color + attenuation * hit_record.material.emit;
-            }
-            if (scattered) {
-                current_ray.origin = hit_record.point + 1e-4f * hit_record.normal;
-                current_ray.dir = temp_ray.dir;
-            } else {
-                color = {0.0f, 0.0f, 0.0f};
-                break;
-            }
-        } else {
-            const vec3 unit_dir = normalize(current_ray.dir);
-            float t = 0.5f * (unit_dir.y + 1.0f);
-            color = color + ((1.0f - t) * vec3{1.0f, 1.0f, 1.0f} + t * vec3{0.5f, 0.7f, 1.0f}) * attenuation;
-            break;
-        }
-    }
-    return color;
-}
-
-__global__ void render_kernel(unsigned char* img, const CameraData* cam, const Sphere* spheres, unsigned int spheres_count, curandState* rng_state) {
+__global__ void render_kernel(TensorView<char, 3> d_img, const CameraData* cam, TensorView<Sphere, 1> d_spheres, curandState* rng_state) {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= cam->image_width || y >= cam->image_height) return;
@@ -310,7 +274,7 @@ __global__ void render_kernel(unsigned char* img, const CameraData* cam, const S
             .dir    = normalize({dir_world4.x, dir_world4.y, dir_world4.z}),
         };
 
-        color = color + ray_color(ray, cam->max_depth, spheres, spheres_count, local_state);
+        color = color + ray_color(ray, cam->max_depth, d_spheres, local_state);
     }
 
     color = color / (float)cam->samples_per_pixel;
@@ -320,89 +284,13 @@ __global__ void render_kernel(unsigned char* img, const CameraData* cam, const S
     float g = color_linear_to_gamma(color.y);
     float b = color_linear_to_gamma(color.z);
 
-    int idx = 3 * (y * cam->image_width + x);
-    img[idx+0] = (unsigned char)(255.0f * clamp(r, 0.0f, 0.999f));
-    img[idx+1] = (unsigned char)(255.0f * clamp(g, 0.0f, 0.999f));
-    img[idx+2] = (unsigned char)(255.0f * clamp(b, 0.0f, 0.999f));
-}
-
-__global__ void render_kernel_vb(unsigned char* img, const CameraData* cam, const VertexBuffer* d_vb, curandState* rng_state) {
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x >= cam->image_width || y >= cam->image_height) return;
-
-    const float viewport_height = 2.0f;
-    const float viewport_width  = viewport_height * (float)cam->image_width / (float)cam->image_height;
-
-    const vec3 pixel_delta_u = {viewport_width / (float)cam->image_width, 0.0f, 0.0f};
-    const vec3 pixel_delta_v = {0.0f, -viewport_height / (float)cam->image_height, 0.0f};
-
-    const vec3 viewport_upper_left = {-viewport_width / 2.0f, viewport_height / 2.0f, -cam->focal_length};
-    const vec3 pixel00_loc = viewport_upper_left + (pixel_delta_u + pixel_delta_v) * 0.5f;
-
-    curandState* local_state = &rng_state[y * cam->image_width + x];
-    vec3 color = {0.0f, 0.0f, 0.0f};
-
-    for (size_t sample = 0u; sample < cam->samples_per_pixel; ++sample) {
-        vec3 offset = sample_square(local_state);
-        vec3 pixel_sample = pixel00_loc + (x + offset.x) * pixel_delta_u + (y + offset.y) * pixel_delta_v;
-
-        float4 origin_cam = make_float4(0.0f, 0.0f, 0.0f, 1.0f);
-        float4 dir_cam    = make_float4(pixel_sample.x, pixel_sample.y, pixel_sample.z, 0);
-
-        float4 origin_world4 = mmul(cam->camera_to_world, origin_cam);
-        float4 dir_world4    = mmul(cam->camera_to_world, dir_cam);
-
-        Ray ray = Ray {
-            .origin = vec3{origin_world4.x, origin_world4.y, origin_world4.z},
-            .dir    = normalize({dir_world4.x, dir_world4.y, dir_world4.z}),
-        };
-
-        color = color + ray_color_vb(ray, cam->max_depth, d_vb, local_state);
-    }
-
-    color = color / (float)cam->samples_per_pixel;
-
-    // gamma correction
-    float r = color_linear_to_gamma(color.x);
-    float g = color_linear_to_gamma(color.y);
-    float b = color_linear_to_gamma(color.z);
-
-    int idx = 3 * (y * cam->image_width + x);
-    img[idx+0] = (unsigned char)(255.0f * clamp(r, 0.0f, 0.999f));
-    img[idx+1] = (unsigned char)(255.0f * clamp(g, 0.0f, 0.999f));
-    img[idx+2] = (unsigned char)(255.0f * clamp(b, 0.0f, 0.999f));
+    d_img.at(y, x, 0) = (unsigned char)(255.0f * clamp(r, 0.0f, 0.999f));
+    d_img.at(y, x, 1) = (unsigned char)(255.0f * clamp(g, 0.0f, 0.999f));
+    d_img.at(y, x, 2) = (unsigned char)(255.0f * clamp(b, 0.0f, 0.999f));
 }
 
 curandState *d_rng_state;
 
-
-EXTERN_C VertexBuffer* vb_alloc(size_t count) {
-    // Allocate the struct on the host heap
-    VertexBuffer *vb = (VertexBuffer*)malloc(sizeof(VertexBuffer));
-    assert(vb != NULL);
-
-    // Allocate device memory for the buffers
-    CHECK_CUDA(cudaMalloc((void**)&vb->p_buf, count * sizeof(vec3)));
-    CHECK_CUDA(cudaMalloc((void**)&vb->c_buf, count * sizeof(vec3)));
-    CHECK_CUDA(cudaMalloc((void**)&vb->n_buf, count * sizeof(vec3)));
-    vb->count = count;
-
-    CHECK_CUDA(cudaDeviceSynchronize());
-
-    return vb;
-}
-
-EXTERN_C void vb_free(VertexBuffer *vb) {
-    assert(vb != NULL);
-
-    CHECK_CUDA(cudaFree(vb->p_buf));
-    CHECK_CUDA(cudaFree(vb->c_buf));
-    CHECK_CUDA(cudaFree(vb->n_buf));
-    CHECK_CUDA(cudaDeviceSynchronize());
-
-    free(vb);
-}
 
 EXTERN_C void rng_init(const CameraData *cam, int seed) {
     CHECK_CUDA(cudaMalloc(&d_rng_state, cam->image_height * cam->image_width * sizeof(curandState)));
@@ -416,22 +304,12 @@ EXTERN_C void rng_init(const CameraData *cam, int seed) {
     CHECK_CUDA(cudaDeviceSynchronize());
 }
 
-EXTERN_C void launch_raycast(unsigned char *d_img, const CameraData* cam, const Sphere* d_spheres, size_t spheres_count) {
+EXTERN_C void launch_raycast(TensorView<char, 3> d_img, const CameraData* cam, TensorView<Sphere, 1> d_spheres) {
     dim3 block(16, 16);
     dim3 grid((cam->image_width + block.x - 1) / block.x,
                 (cam->image_height + block.y - 1) / block.y);
 
-    render_kernel<<<grid, block>>>(d_img, cam, d_spheres, spheres_count, d_rng_state);
-    CHECK_CUDA(cudaPeekAtLastError());
-}
-
-EXTERN_C void vb_render(unsigned char *d_img, const CameraData *cam,
-                        VertexBuffer const* d_vb) {
-    dim3 block(16, 16);
-    dim3 grid((cam->image_width + block.x - 1) / block.x,
-                (cam->image_height + block.y - 1) / block.y);
-
-    render_kernel_vb<<<grid, block>>>(d_img, cam, d_vb, d_rng_state);
+    render_kernel<<<grid, block>>>(d_img, cam, d_spheres, d_rng_state);
     CHECK_CUDA(cudaPeekAtLastError());
 }
 
