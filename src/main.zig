@@ -38,7 +38,7 @@ fn run_sim(shared: *SimSharedState) !void {
     var img_dev = try cu.CudaBuffer(u8).init(img_size);
     defer img_dev.deinit();
 
-    rc.rng_init(&shared.cam, RNG_SEED);
+    rc.rng_init(shared.cam.image_height, shared.cam.image_width, RNG_SEED);
     defer rc.rng_deinit();
 
     while (shared.running.load(.acquire)) {

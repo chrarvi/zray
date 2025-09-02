@@ -292,14 +292,14 @@ __global__ void render_kernel(TensorView<char, 3> d_img, const CameraData* cam, 
 curandState *d_rng_state;
 
 
-EXTERN_C void rng_init(const CameraData *cam, int seed) {
-    CHECK_CUDA(cudaMalloc(&d_rng_state, cam->image_height * cam->image_width * sizeof(curandState)));
+EXTERN_C void rng_init(size_t image_height, size_t image_width, int seed) {
+    CHECK_CUDA(cudaMalloc(&d_rng_state, image_height * image_width * sizeof(curandState)));
 
     dim3 block(16, 16);
-    dim3 grid((cam->image_width + block.x - 1) / block.x,
-                (cam->image_height + block.y - 1) / block.y);
+    dim3 grid((image_width + block.x - 1) / block.x,
+                (image_height + block.y - 1) / block.y);
 
-    setup_rng<<<grid, block>>>(d_rng_state, cam->image_width, cam->image_height, seed);
+    setup_rng<<<grid, block>>>(d_rng_state, image_width, image_height, seed);
     CHECK_CUDA(cudaPeekAtLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 }

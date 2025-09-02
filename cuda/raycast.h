@@ -55,7 +55,7 @@ typedef struct {
     size_t count;
 } VertexBuffer;
 
-EXTERN_C void rng_init(const CameraData *cam, int seed);
+EXTERN_C void rng_init(size_t image_width, size_t image_height, int seed);
 EXTERN_C void rng_deinit(void);
 
 #endif // RAYCAST_H_
