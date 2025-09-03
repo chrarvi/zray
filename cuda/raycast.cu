@@ -7,6 +7,8 @@
 #include "math.cuh"
 #include "tensor_view.cuh"
 
+#include <stdio.h>
+
 #include <curand.h>
 #include <curand_kernel.h>
 
@@ -32,6 +34,16 @@ typedef struct {
     float t;
     bool front_face;
 } HitRecord;
+
+__device__ inline vec3 tv_get_vec3(TensorView<float, 2> tv, size_t i) {
+    return vec3{ tv.at(i, 0), tv.at(i, 1), tv.at(i, 2) };
+}
+
+__device__ inline vec3 bary_lerp(const vec3& a, const vec3& b, const vec3& c, float u, float v) {
+    // barycentric weights: w = 1 - u - v
+    float w = 1.0f - u - v;
+    return w * a + u * b + v * c;
+}
 
 __global__ void setup_rng(curandState* state, int width, int height, int seed) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -117,7 +129,8 @@ __device__ bool triangle_hit(
     const vec3 p1, const vec3 p2, const vec3 p3,
     const Ray *ray,
     float ray_tmin, float ray_tmax,
-    HitRecord *hit_record)
+    float* out_t, float* out_u, float* out_v,
+    vec3* out_normal, bool* out_front_face)
 {
     const float EPS = 1e-8f;
 
@@ -126,8 +139,7 @@ __device__ bool triangle_hit(
 
     vec3 h = cross(ray->dir, e2);
     float a = dot(e1, h);
-
-    if (fabsf(a) < EPS) return false;  // Ray parallel to triangle
+    if (fabsf(a) < EPS) return false;  // parallel
 
     float f = 1.0f / a;
     vec3 s = ray->origin - p1;
@@ -141,18 +153,78 @@ __device__ bool triangle_hit(
     float t = f * dot(e2, q);
     if (!range_surrounds(t, ray_tmin, ray_tmax)) return false;
 
-    vec3 point = ray_at(ray, t);
-
     vec3 outward_normal = normalize(cross(e1, e2));
     bool front_face = dot(ray->dir, outward_normal) < 0.0f;
 
-    hit_record->t = t;
-    hit_record->point = point;
-    hit_record->front_face = front_face;
-    hit_record->normal = front_face ? outward_normal : outward_normal * -1.0f;
-
+    if (out_t) *out_t = t;
+    if (out_u) *out_u = u;
+    if (out_v) *out_v = v;
+    if (out_front_face) *out_front_face = front_face;
+    if (out_normal) *out_normal = front_face ? outward_normal : outward_normal * -1.0f;
     return true;
 }
+
+__device__ bool mesh_hit(
+    const Ray* ray,
+    TensorView<float, 2> d_vb_pos,
+    TensorView<float, 2> d_vb_norm,
+    TensorView<float, 2> d_vb_color,
+    float ray_tmin, float ray_tmax,
+    HitRecord* hit_record)
+{
+    const size_t n = d_vb_pos.shape[0];
+    if (n < 3) return false;
+
+    bool hit_anything = false;
+    float closest = ray_tmax;
+
+    for (size_t i = 0; i + 2 < n; i+=3) {
+        vec3 p0 = tv_get_vec3(d_vb_pos, i + 0);
+        vec3 p1 = tv_get_vec3(d_vb_pos, i + 1);
+        vec3 p2 = tv_get_vec3(d_vb_pos, i + 2);
+
+        float t, u, v;
+        vec3 tri_normal;
+        bool front_face;
+
+        if (triangle_hit(p0, p1, p2, ray, ray_tmin, closest, &t, &u, &v, &tri_normal, &front_face)) {
+            hit_anything = true;
+            closest = t;
+            vec3 point = ray_at(ray, t);
+
+            vec3 n0 = tri_normal, n1 = tri_normal, n2 = tri_normal;
+            if (d_vb_norm.shape[0] >= i + 3) {
+                n0 = normalize(tv_get_vec3(d_vb_norm, i + 0));
+                n1 = normalize(tv_get_vec3(d_vb_norm, i + 1));
+                n2 = normalize(tv_get_vec3(d_vb_norm, i + 2));
+            }
+            vec3 n_shade = normalize(bary_lerp(n0, n1, n2, u, v));
+            if (!front_face) n_shade = n_shade * -1;
+
+            vec3 c0{1,1,1}, c1{1,1,1}, c2{1,1,1};
+            if (d_vb_color.shape[0] >= i + 3) {
+                c0 = tv_get_vec3(d_vb_color, i + 0);
+                c1 = tv_get_vec3(d_vb_color, i + 1);
+                c2 = tv_get_vec3(d_vb_color, i + 2);
+            }
+            vec3 albedo = bary_lerp(c0, c1, c2, u, v);
+
+            hit_record->t          = t;
+            hit_record->point      = point;
+            hit_record->normal     = n_shade;
+            hit_record->front_face = front_face;
+
+            // TODO: other materials? Need to upload more proper meshes that have materials for that.
+            hit_record->material.kind   = MAT_LAMBERTIAN;
+            hit_record->material.albedo = albedo;
+            hit_record->material.emit   = vec3{0,0,0};
+            hit_record->material.fuzz   = 0.0f;
+        }
+    }
+
+    return hit_anything;
+}
+
 
 __device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres, float ray_tmin, float ray_tmax, HitRecord* hit_record) {
     bool hit = false;
@@ -175,29 +247,6 @@ __device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres, flo
     return hit;
 }
 
-__device__ bool triangles_hit(const Ray* ray, const VertexBuffer *d_vb, float ray_tmin, float ray_tmax, HitRecord* hit_record) {
-    bool hit = false;
-    float closest_so_far = ray_tmax;
-    for (size_t i = 0u; i < d_vb->count; i+=3) {
-        HitRecord temp_hit = {};
-        const vec3 p0 = d_vb->p_buf[i];
-        const vec3 p1 = d_vb->p_buf[i+1];
-        const vec3 p2 = d_vb->p_buf[i+2];
-        bool _hit = triangle_hit(p0, p1, p2, ray, ray_tmin, closest_so_far, &temp_hit);
-        if (_hit) {
-            hit = true;
-            closest_so_far = temp_hit.t;
-            hit_record->t = temp_hit.t;
-            // hit_record->material = sphere->material;
-            hit_record->normal = temp_hit.normal;
-            hit_record->point = temp_hit.point;
-            hit_record->front_face = temp_hit.front_face;
-        }
-    }
-
-    return hit;
-}
-
 __device__ vec3 sample_square(curandState *local_state) {
     float x = curand_uniform(local_state) - 0.5f;
     float y = curand_uniform(local_state) - 0.5f;
@@ -205,34 +254,61 @@ __device__ vec3 sample_square(curandState *local_state) {
     return {x, y, z};
 }
 
-__device__ vec3 ray_color(const Ray& ray, int max_depth, TensorView<Sphere, 1> d_spheres, curandState* local_state) {
+__device__ vec3 ray_color(
+    const Ray& ray,
+    int max_depth,
+    TensorView<Sphere, 1> d_spheres,
+    TensorView<float, 2> d_vb_pos,
+    TensorView<float, 2> d_vb_norm,
+    TensorView<float, 2> d_vb_color,
+    curandState* local_state)
+{
     Ray current_ray = ray;
     vec3 attenuation = {1.0f, 1.0f, 1.0f};
     vec3 color = {0.0f, 0.0f, 0.0f};
 
     for (int depth = 0; depth < max_depth; ++depth) {
-        HitRecord hit_record;
-        if (spheres_hit(&current_ray, d_spheres, 0.001f, INFINITY, &hit_record)) {
+        HitRecord best_hit;
+        bool hit_anything = false;
+        float tmax = INFINITY;
+
+        HitRecord sphere_hitrec;
+        if (spheres_hit(&current_ray, d_spheres, 0.001f, tmax, &sphere_hitrec)) {
+            best_hit = sphere_hitrec;
+            tmax = sphere_hitrec.t;
+            hit_anything = true;
+        }
+        HitRecord mesh_hitrec;
+        if (mesh_hit(&current_ray, d_vb_pos, d_vb_norm, d_vb_color, 0.001f, tmax, &mesh_hitrec)) {
+            best_hit = mesh_hitrec;
+            tmax = mesh_hitrec.t;
+            hit_anything = true;
+        }
+
+        if (hit_anything) {
             bool scattered = false;
             Ray temp_ray = {current_ray.origin, current_ray.dir};
-            switch (hit_record.material.kind) {
-            case MAT_LAMBERTIAN:
-                scattered = scatter_lambertian(&current_ray, &hit_record, local_state, &attenuation, &temp_ray);
-                break;
-            case MAT_METAL:
-                scattered = scatter_metal(&current_ray, &hit_record, local_state, &attenuation, &temp_ray);
-                break;
-            case MAT_EMISSIVE:
-                return color + attenuation * hit_record.material.emit;
+
+            switch (best_hit.material.kind) {
+                case MAT_LAMBERTIAN:
+                    scattered = scatter_lambertian(&current_ray, &best_hit, local_state, &attenuation, &temp_ray);
+                    break;
+                case MAT_METAL:
+                    scattered = scatter_metal(&current_ray, &best_hit, local_state, &attenuation, &temp_ray);
+                    break;
+                case MAT_EMISSIVE:
+                    return color + attenuation * best_hit.material.emit;
             }
+
             if (scattered) {
-                current_ray.origin = hit_record.point + 1e-4f * hit_record.normal;
-                current_ray.dir = temp_ray.dir;
+                current_ray.origin = best_hit.point + 1e-4f * best_hit.normal;
+                current_ray.dir    = temp_ray.dir;
             } else {
                 color = {0.0f, 0.0f, 0.0f};
                 break;
             }
         } else {
+            // Miss: sky
             const vec3 unit_dir = normalize(current_ray.dir);
             float t = 0.5f * (unit_dir.y + 1.0f);
             color = color + ((1.0f - t) * vec3{1.0f, 1.0f, 1.0f} + t * vec3{0.5f, 0.7f, 1.0f}) * attenuation;
@@ -242,7 +318,15 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, TensorView<Sphere, 1> d
     return color;
 }
 
-__global__ void render_kernel(TensorView<char, 3> d_img, const CameraData* cam, TensorView<Sphere, 1> d_spheres, curandState* rng_state) {
+__global__ void render_kernel(
+    TensorView<char, 3> d_img,
+    const CameraData* cam,
+    TensorView<Sphere, 1> d_spheres,
+    TensorView<float, 2> d_vb_pos,
+    TensorView<float, 2> d_vb_norm,
+    TensorView<float, 2> d_vb_color,
+    curandState* rng_state) {
+
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= cam->image_width || y >= cam->image_height) return;
@@ -274,7 +358,7 @@ __global__ void render_kernel(TensorView<char, 3> d_img, const CameraData* cam, 
             .dir    = normalize({dir_world4.x, dir_world4.y, dir_world4.z}),
         };
 
-        color = color + ray_color(ray, cam->max_depth, d_spheres, local_state);
+        color = color + ray_color(ray, cam->max_depth, d_spheres, d_vb_pos, d_vb_norm, d_vb_color, local_state);
     }
 
     color = color / (float)cam->samples_per_pixel;
@@ -304,12 +388,23 @@ EXTERN_C void rng_init(size_t image_height, size_t image_width, int seed) {
     CHECK_CUDA(cudaDeviceSynchronize());
 }
 
-EXTERN_C void launch_raycast(TensorView<char, 3> d_img, const CameraData* cam, TensorView<Sphere, 1> d_spheres) {
+EXTERN_C void launch_raycast(
+    TensorView<char, 3> d_img,
+    const CameraData* cam,
+    TensorView<Sphere, 1> d_spheres,
+    TensorView<float, 2> d_vb_pos,
+    TensorView<float, 2> d_vb_color,
+    TensorView<float, 2> d_vb_norm) {
+    // d_img: height, width 3
+    // d_spheres: n_spheres
+    // d_vb_pos: n_vertex, 3
+    // d_vb_color: n_vertex, 3
+    // d_vb_norm: n_vertex, 3
     dim3 block(16, 16);
     dim3 grid((cam->image_width + block.x - 1) / block.x,
                 (cam->image_height + block.y - 1) / block.y);
 
-    render_kernel<<<grid, block>>>(d_img, cam, d_spheres, d_rng_state);
+    render_kernel<<<grid, block>>>(d_img, cam, d_spheres, d_vb_pos, d_vb_norm, d_vb_color, d_rng_state);
     CHECK_CUDA(cudaPeekAtLastError());
 }
 

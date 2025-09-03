@@ -24,7 +24,7 @@ pub fn look_at(self: *const Self) al.Mat4 {
 }
 
 pub fn camera_to_world(self: *const Self) al.Mat4 {
-    const f = al.normalize(self.target - self.eye);
+    const f = al.normalize(al.sub(self.target, self.eye));
     const r = al.normalize(al.cross(f, self.up));
     const u = al.cross(r, f);
 

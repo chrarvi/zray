@@ -50,7 +50,44 @@ const SimSharedState = struct {
 const SIMULATION_FRAMERATE: f32 = 30.0;
 const RENDERING_FRAMERATE: f32 = 60.0;
 
-pub extern fn launch_raycast(d_img: cu.TensorView(u8, 3), cam: *rc.CameraData, d_spheres: cu.TensorView(rc.Sphere, 1)) void;
+pub extern fn launch_raycast(
+    d_img: cu.TensorView(u8, 3),
+    cam: *rc.CameraData,
+    d_spheres: cu.TensorView(rc.Sphere, 1),
+    d_vb_pos: cu.TensorView(f32, 2),
+    d_vb_color: cu.TensorView(f32, 2),
+    d_vb_normal: cu.TensorView(f32, 2),
+) void;
+
+pub fn fill_world(world: *World) !void {
+    const lambertian_mat = rc.Material{
+        .kind = rc.MAT_LAMBERTIAN,
+        .albedo = .{ .x = 0.1, .y = 0.2, .z = 0.5 },
+    };
+    const metal_mat = rc.Material{
+        .kind = rc.MAT_METAL,
+        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
+        .fuzz = 0.05,
+    };
+    const ground_mat = rc.Material{
+        .kind = rc.MAT_LAMBERTIAN,
+        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
+    };
+    const emit_mat = rc.Material{
+        .kind = rc.MAT_EMISSIVE,
+        .emit = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
+    };
+    try world.spheres_host.append(.{ .center = .{ .x = -0.8, .y = -0.15, .z = -0.8 }, .radius = 0.1, .material = lambertian_mat });
+    try world.spheres_host.append(.{ .center = .{ .x = 0.0, .y = 0.0, .z = -1.2 }, .radius = 0.1, .material = emit_mat });
+    try world.spheres_host.append(.{ .center = .{ .x = 0.8, .y = -0.15, .z = -0.8 }, .radius = 0.1, .material = metal_mat });
+    try world.spheres_host.append(.{ .center = .{ .x = 0.0, .y = -100.5, .z = -1.0 }, .radius = 0.1, .material = ground_mat });
+
+    try world.vb_host.push_vertex(.{-0.3, -0.1, -1.0}, .{1.0, 0.0, 0.0}, .{0.0, 0.0, 1.0});
+    try world.vb_host.push_vertex(.{0.0, 0.2, -1.5}, .{0.0, 1.0, 0.0}, .{0.0, 0.0, 1.0});
+    try world.vb_host.push_vertex(.{0.3, -0.1, -1.0}, .{0.0, 0.0, 1.0}, .{0.0, 0.0, 1.0});
+
+    try world.vb_dev.fromHost(&world.vb_host);
+}
 
 fn run_sim(shared: *SimSharedState) !void {
     try fill_world(&shared.world);
@@ -79,37 +116,20 @@ fn run_sim(shared: *SimSharedState) !void {
         const write_idx: usize = 1 - current_ready;
 
         try shared.world.spheres_dev.fromHost(shared.world.spheres_host.items);
-        launch_raycast(try shared.frame_buffer_dev.view(3, .{shared.cam.image_height, shared.cam.image_width, 3}), &shared.cam, try shared.world.spheres_dev.view(1, .{shared.world.spheres_dev.len}));
+        launch_raycast(
+            try shared.frame_buffer_dev.view(3, .{shared.cam.image_height, shared.cam.image_width, 3}),
+            &shared.cam,
+            try shared.world.spheres_dev.view(1, .{shared.world.spheres_dev.len}),
+            try shared.world.vb_dev.pos_buf.view(2, .{shared.world.vb_dev.pos_buf.len / 3, 3}),
+            try shared.world.vb_dev.color_buf.view(2, .{shared.world.vb_dev.color_buf.len / 3, 3}),
+            try shared.world.vb_dev.normal_buf.view(2, .{shared.world.vb_dev.normal_buf.len / 3, 3}),
+        ) ;
         try shared.frame_buffer_dev.toHost(shared.frame_buffers_host[write_idx]);
 
         shared.ready_idx.store(write_idx, .release);
 
         frame += 1.0;
     }
-}
-
-pub fn fill_world(world: *World) !void {
-    const lambertian_mat = rc.Material{
-        .kind = rc.MAT_LAMBERTIAN,
-        .albedo = .{ .x = 0.1, .y = 0.2, .z = 0.5 },
-    };
-    const metal_mat = rc.Material{
-        .kind = rc.MAT_METAL,
-        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
-        .fuzz = 0.05,
-    };
-    const ground_mat = rc.Material{
-        .kind = rc.MAT_LAMBERTIAN,
-        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
-    };
-    const emit_mat = rc.Material{
-        .kind = rc.MAT_EMISSIVE,
-        .emit = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
-    };
-    try world.spheres_host.append(.{ .center = .{ .x = -0.8, .y = -0.15, .z = -0.8 }, .radius = 0.3, .material = lambertian_mat });
-    try world.spheres_host.append(.{ .center = .{ .x = 0.0, .y = 0.0, .z = -1.2 }, .radius = 0.5, .material = emit_mat });
-    try world.spheres_host.append(.{ .center = .{ .x = 0.8, .y = -0.15, .z = -0.8 }, .radius = 0.3, .material = metal_mat });
-    try world.spheres_host.append(.{ .center = .{ .x = 0.0, .y = -100.5, .z = -1.0 }, .radius = 100.0, .material = ground_mat });
 }
 
 pub fn main() !void {
@@ -162,7 +182,7 @@ pub fn main() !void {
             .max_depth = 10,
             .camera_to_world = camera.camera_to_world(),
         },
-        .world = try World.init(gpa, 4, 4),
+        .world = try World.init(gpa, 4, 9),
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
