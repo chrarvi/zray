@@ -26,6 +26,7 @@ typedef struct {
     int max_depth;
 
     mat4 camera_to_world;
+    mat4 inv_proj;
 } CameraData;
 
 typedef enum {

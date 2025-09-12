@@ -325,37 +325,36 @@ __global__ void render_kernel(
     TensorView<float, 2> d_vb_pos,
     TensorView<float, 2> d_vb_norm,
     TensorView<float, 2> d_vb_color,
-    curandState* rng_state) {
-
+    curandState* rng_state)
+{
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= cam->image_width || y >= cam->image_height) return;
-
-    const float viewport_height = 2.0f;
-    const float viewport_width  = viewport_height * (float)cam->image_width / (float)cam->image_height;
-
-    const vec3 pixel_delta_u = {viewport_width / (float)cam->image_width, 0.0f, 0.0f};
-    const vec3 pixel_delta_v = {0.0f, -viewport_height / (float)cam->image_height, 0.0f};
-
-    const vec3 viewport_upper_left = {-viewport_width / 2.0f, viewport_height / 2.0f, -cam->focal_length};
-    const vec3 pixel00_loc = viewport_upper_left + (pixel_delta_u + pixel_delta_v) * 0.5f;
 
     curandState* local_state = &rng_state[y * cam->image_width + x];
     vec3 color = {0.0f, 0.0f, 0.0f};
 
     for (size_t sample = 0u; sample < cam->samples_per_pixel; ++sample) {
         vec3 offset = sample_square(local_state);
-        vec3 pixel_sample = pixel00_loc + (x + offset.x) * pixel_delta_u + (y + offset.y) * pixel_delta_v;
+        float ndc_x = ((x + offset.x) / (float)cam->image_width)  * 2.0f - 1.0f;
+        float ndc_y = ((y + offset.y) / (float)cam->image_height) * 2.0f - 1.0f;
 
-        float4 origin_cam = make_float4(0.0f, 0.0f, 0.0f, 1.0f);
-        float4 dir_cam    = make_float4(pixel_sample.x, pixel_sample.y, pixel_sample.z, 0);
+        ndc_y = -ndc_y;
+
+        float4 clip = make_float4(ndc_x, ndc_y, -1.0f, 1.0f);
+
+        float4 cam_h = mmul(cam->inv_proj, clip);
+        vec3 dir_cam = normalize(vec3{ cam_h.x, cam_h.y, cam_h.z } / cam_h.w);
+
+        float4 origin_cam = make_float4(0, 0, 0, 1);
+        float4 dir_cam4   = make_float4(dir_cam.x, dir_cam.y, dir_cam.z, 0);
 
         float4 origin_world4 = mmul(cam->camera_to_world, origin_cam);
-        float4 dir_world4    = mmul(cam->camera_to_world, dir_cam);
+        float4 dir_world4    = mmul(cam->camera_to_world, dir_cam4);
 
         Ray ray = Ray {
-            .origin = vec3{origin_world4.x, origin_world4.y, origin_world4.z},
-            .dir    = normalize({dir_world4.x, dir_world4.y, dir_world4.z}),
+            .origin = vec3{ origin_world4.x, origin_world4.y, origin_world4.z },
+            .dir    = normalize({ dir_world4.x, dir_world4.y, dir_world4.z }),
         };
 
         color = color + ray_color(ray, cam->max_depth, d_spheres, d_vb_pos, d_vb_norm, d_vb_color, local_state);

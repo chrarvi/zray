@@ -26,7 +26,6 @@ test "add_f32_2d kernel computes correctly" {
     const b_view = try b.view(2, .{10, 10});
     const c_view = try c.view(2, .{10, 10});
 
-    // Call kernel twice like your main
     add_f32_2d(a_view, b_view, c_view);
     add_f32_2d(c_view, b_view, c_view);
 
