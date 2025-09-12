@@ -47,7 +47,7 @@ const SimSharedState = struct {
     world: World,
 };
 
-const SIMULATION_FRAMERATE: f32 = 30.0;
+const SIMULATION_FRAMERATE: f32 = 15.0;
 const RENDERING_FRAMERATE: f32 = 60.0;
 
 pub extern fn launch_raycast(
@@ -60,10 +60,6 @@ pub extern fn launch_raycast(
 ) void;
 
 pub fn fill_world(world: *World) !void {
-    const lambertian_mat = rc.Material{
-        .kind = rc.MAT_LAMBERTIAN,
-        .albedo = .{ .x = 0.1, .y = 0.2, .z = 0.5 },
-    };
     const metal_mat = rc.Material{
         .kind = rc.MAT_METAL,
         .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
@@ -73,14 +69,57 @@ pub fn fill_world(world: *World) !void {
         .kind = rc.MAT_LAMBERTIAN,
         .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
     };
-    const emit_mat = rc.Material{
-        .kind = rc.MAT_EMISSIVE,
-        .emit = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
-    };
-    try world.spheres_host.append(.{ .center = .{ .x = -0.8, .y = -0.15, .z = -0.8 }, .radius = 0.2, .material = lambertian_mat });
-    try world.spheres_host.append(.{ .center = .{ .x = 0.8, .y = 0.0, .z = -1.2 }, .radius = 0.3, .material = emit_mat });
-    try world.spheres_host.append(.{ .center = .{ .x = 0.8, .y = -0.15, .z = -0.8 }, .radius = 0.4, .material = metal_mat });
-    try world.spheres_host.append(.{ .center = .{ .x = 0.0, .y = -100.5, .z = -1.0 }, .radius = 100.0, .material = ground_mat });
+
+    const world_width = 50.0;
+    const world_depth = 50.0;
+    const world_height = 0.0;
+    const rad_max = 2.0;
+
+    var prng = std.Random.DefaultPrng.init(123456);
+    var rand = prng.random();
+    const num_spheres = 99;
+    for (0..num_spheres) |_| {
+        const x = (rand.float(f32) - 0.5) * world_width;
+        const z = (rand.float(f32) - 0.5) * world_depth;
+        const r = rand.float(f32) * rad_max;
+        const y = (rand.float(f32) - 0.5) * world_height + r / 2.0;
+        const mat_idx = rand.intRangeAtMost(usize, 0, 2);
+        var mat = metal_mat;
+        if (mat_idx == 0) {
+            mat = rc.Material{
+                .kind = rc.MAT_LAMBERTIAN,
+                .albedo = .{
+                    .x = rand.float(f32),
+                    .y = rand.float(f32),
+                    .z = rand.float(f32),
+                },
+            };
+        } else if (mat_idx == 1) {
+            mat = rc.Material{
+                .kind = rc.MAT_METAL,
+                .albedo = .{
+                    .x = 0.5 + 0.5 * rand.float(f32),
+                    .y = 0.5 + 0.5 * rand.float(f32),
+                    .z = 0.5 + 0.5 * rand.float(f32),
+                },
+                .fuzz = rand.float(f32) * 0.5,
+            };
+        } else if (mat_idx == 2) {
+            mat = rc.Material{
+                .kind = rc.MAT_EMISSIVE,
+                .emit = .{
+                    .x = rand.float(f32),
+                    .y = rand.float(f32),
+                    .z = rand.float(f32),
+                },
+            };
+        }
+
+        try world.spheres_host.append(.{ .center = .{ .x = x, .y = y, .z = z }, .radius = r, .material = mat });
+    }
+    try world.spheres_host.append(.{ .center = .{ .x = 0.0, .y = -1000.5, .z = -1.0 }, .radius = 1000.0, .material = ground_mat });
+
+    try world.spheres_dev.fromHost(world.spheres_host.items);
 
     try world.vb_host.push_vertex(.{ -0.3, -0.1, -1.0 }, .{ 1.0, 0.0, 0.0 }, .{ 0.0, 0.0, 1.0 });
     try world.vb_host.push_vertex(.{ 0.0, 0.2, -1.5 }, .{ 1.0, 0.0, 0.0 }, .{ 0.0, 0.0, 1.0 });
@@ -111,15 +150,9 @@ fn run_sim(shared: *SimSharedState) !void {
         }
         last = now;
 
-        const t = frame * 0.03;
-        shared.world.spheres_host.items[0].center.x = -0.8 + 0.3 * @sin(t);
-        shared.world.spheres_host.items[1].center.y = 0.0 + 0.2 * @sin(t * 1.5);
-        shared.world.spheres_host.items[2].center.x = 0.8 + 0.3 * @sin(t * 0.8);
-
         const current_ready = shared.ready_idx.load(.acquire);
         const write_idx: usize = 1 - current_ready;
 
-        try shared.world.spheres_dev.fromHost(shared.world.spheres_host.items);
         launch_raycast(
             try shared.frame_buffer_dev.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }),
             &shared.cam,
@@ -175,12 +208,12 @@ pub fn main() !void {
             .image_width = image_width,
             .image_height = image_height,
             .focal_length = 1.0,
-            .samples_per_pixel = 32,
+            .samples_per_pixel = 16,
             .max_depth = 10,
             .camera_to_world = camera.camera_to_world(),
             .inv_proj = camera.inv_proj,
         },
-        .world = try World.init(gpa, 4, 6 * 3),
+        .world = try World.init(gpa, 100, 6 * 3),
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
