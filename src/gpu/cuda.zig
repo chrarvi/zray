@@ -105,7 +105,8 @@ pub fn CudaBuffer(comptime ValueT: type) type {
         }
 
         pub fn fromHost(self: *Self, src: []const ValueT) !void {
-            if (src.len != self.len) return error.BufferSizeMismatch;
+            std.debug.print("self.len {} src.len {}\n", .{self.len, src.len});
+            if (src.len > self.len) return error.BufferOverflow;
             try checkCuda(cudaMemcpy(
                 self.dev_ptr,
                 src.ptr,

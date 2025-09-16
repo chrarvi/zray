@@ -7,9 +7,14 @@ Requirements:
 - stb_image_write in `external/stb_image_write.h`
 - CUDA 13.0 (only tested this one)
 
-Current progress:
+## Current progress:
+Spheres:
 
 ![alt text](https://github.com/chrarvi/zray/blob/main/assets/render.png?raw=true)
+
+Teapot: (No BVH yet so super inefficient with the number of tris)
+
+![alt text](https://github.com/chrarvi/zray/blob/main/assets/teapot.png?raw=true)
 
 **References**:
 - https://raytracing.github.io/books/RayTracingInOneWeekend.html

@@ -78,13 +78,8 @@ pub fn fill_world(world: *core.World) !void {
     }
     try world.spheres.append(.{ .center = .{ .x = 0.0, .y = -1000.5, .z = -1.0 }, .radius = 1000.0, .material = ground_mat });
 
-    try world.vb.push_vertex(.{ -0.3, -0.1, -1.0 }, .{ 1.0, 0.0, 0.0 }, .{ 0.0, 0.0, 1.0 });
-    try world.vb.push_vertex(.{ 0.0, 0.2, -1.5 }, .{ 1.0, 0.0, 0.0 }, .{ 0.0, 0.0, 1.0 });
-    try world.vb.push_vertex(.{ 0.3, -0.1, -1.0 }, .{ 1.0, 0.0, 0.0 }, .{ 0.0, 0.0, 1.0 });
+    _ = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/teapot.txt");
 
-    try world.vb.push_vertex(.{ 0.6, -0.1, -1.0 }, .{ 0.0, 1.0, 0.0 }, .{ 0.0, 0.0, 1.0 });
-    try world.vb.push_vertex(.{ 1.0, 0.2, -1.5 }, .{ 0.0, 1.0, 0.0 }, .{ 0.0, 0.0, 1.0 });
-    try world.vb.push_vertex(.{ 1.3, -0.1, -1.0 }, .{ 0.0, 1.0, 0.0 }, .{ 0.0, 0.0, 1.0 });
 }
 
 pub fn main() !void {
@@ -126,13 +121,13 @@ pub fn main() !void {
             .image_width = image_width,
             .image_height = image_height,
             .focal_length = 1.0,
-            .samples_per_pixel = 16,
-            .max_depth = 10,
+            .samples_per_pixel = 2,
+            .max_depth = 2,
             .camera_to_world = camera.camera_to_world(),
             .inv_proj = camera.inv_proj,
         },
         .world = try core.World.init(gpa),
-        .world_dev = try gpu.DeviceWorld.init( 100, 6 * 3),
+        .world_dev = try gpu.DeviceWorld.init(100, 205965),
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
@@ -142,7 +137,7 @@ pub fn main() !void {
     defer rc.rng_deinit();
 
     try shared.world_dev.spheres.fromHost(shared.world.spheres.items);
-    try shared.world_dev.vb.fromHost(&shared.world.vb);
+    try shared.world_dev.vb.fromHost(&shared.world.mesh_atlas.vb);
 
     var simulator = sim.Simulator.init(SIMULATION_FRAMERATE, &shared);
     try simulator.start();

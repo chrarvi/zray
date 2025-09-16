@@ -5,16 +5,16 @@ const rc = @import("../gpu/raycast.zig");
 const World = @This();
 
 spheres: std.ArrayList(rc.Sphere),
-vb: core.HostVertexBuffer,
+mesh_atlas: core.MeshAtlas,
 
 pub fn init(allocator: std.mem.Allocator) !World {
     return .{
         .spheres = std.ArrayList(rc.Sphere).init(allocator),
-        .vb = core.HostVertexBuffer.init(allocator),
+        .mesh_atlas = core.MeshAtlas.init(allocator),
     };
 }
 
 pub fn deinit(self: *World) void {
     self.spheres.deinit();
-    self.vb.deinit();
+    self.mesh_atlas.deinit();
 }
