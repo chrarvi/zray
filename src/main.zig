@@ -18,6 +18,8 @@ const AtomicBool = std.atomic.Value(bool);
 const SIMULATION_FRAMERATE: f32 = 30.0;
 const RENDERING_FRAMERATE: f32 = 60.0;
 
+const NUM_SPHERES = 4;
+
 pub fn fill_world(world: *core.World) !void {
     const metal_mat = rc.Material{
         .kind = rc.MaterialKind.Metal,
@@ -36,7 +38,7 @@ pub fn fill_world(world: *core.World) !void {
 
     var prng = std.Random.DefaultPrng.init(123456);
     var rand = prng.random();
-    const num_spheres = 99;
+    const num_spheres = NUM_SPHERES;
     for (0..num_spheres) |_| {
         const x = (rand.float(f32) - 0.5) * world_width;
         const z = (rand.float(f32) - 0.5) * world_depth;
@@ -78,7 +80,10 @@ pub fn fill_world(world: *core.World) !void {
     }
     try world.spheres.append(.{ .center = .{ .x = 0.0, .y = -1000.5, .z = -1.0 }, .radius = 1000.0, .material = ground_mat });
 
-    _ = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/teapot.txt");
+    const icosa_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/icosahedron.txt");
+    const cube_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/cube.txt");
+    _ = icosa_mesh;
+    _ = cube_mesh;
 
 }
 
@@ -121,13 +126,13 @@ pub fn main() !void {
             .image_width = image_width,
             .image_height = image_height,
             .focal_length = 1.0,
-            .samples_per_pixel = 2,
-            .max_depth = 2,
+            .samples_per_pixel = 16,
+            .max_depth = 8,
             .camera_to_world = camera.camera_to_world(),
             .inv_proj = camera.inv_proj,
         },
         .world = try core.World.init(gpa),
-        .world_dev = try gpu.DeviceWorld.init(100, 205965),
+        .world_dev = try gpu.DeviceWorld.init(NUM_SPHERES+1, (36+60)*3, (36+60), 2),
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
@@ -138,6 +143,8 @@ pub fn main() !void {
 
     try shared.world_dev.spheres.fromHost(shared.world.spheres.items);
     try shared.world_dev.vb.fromHost(&shared.world.mesh_atlas.vb);
+    try shared.world_dev.indices.fromHost(shared.world.mesh_atlas.indices.items);
+    try shared.world_dev.mesh_ranges.fromHost(shared.world.mesh_atlas.meshes.items);
 
     var simulator = sim.Simulator.init(SIMULATION_FRAMERATE, &shared);
     try simulator.start();

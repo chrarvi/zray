@@ -64,13 +64,16 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
         const current_ready = shared.ready_idx.load(.acquire);
         const write_idx: usize = 1 - current_ready;
 
+        const wd = &shared.world_dev;
         rc.launch_raycast(
             try shared.frame_buffer_dev.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }),
             &shared.cam,
-            try shared.world_dev.spheres.view(1, .{shared.world_dev.spheres.len}),
-            try shared.world_dev.vb.pos_buf.view(2, .{ shared.world_dev.vb.pos_buf.len / 3, 3 }),
-            try shared.world_dev.vb.color_buf.view(2, .{ shared.world_dev.vb.color_buf.len / 3, 3 }),
-            try shared.world_dev.vb.normal_buf.view(2, .{ shared.world_dev.vb.normal_buf.len / 3, 3 }),
+            try wd.spheres.view(1, .{wd.spheres.len}),
+            try wd.vb.pos_buf.view(2, .{ wd.vb.pos_buf.len / 3, 3 }),
+            try wd.vb.color_buf.view(2, .{ wd.vb.color_buf.len / 3, 3 }),
+            try wd.vb.normal_buf.view(2, .{ wd.vb.normal_buf.len / 3, 3 }),
+            try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
+            try wd.mesh_ranges.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
         );
         try shared.frame_buffer_dev.toHost(shared.frame_buffers_host[write_idx]);
 

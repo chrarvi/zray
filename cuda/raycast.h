@@ -49,12 +49,9 @@ typedef struct {
 } Sphere;
 
 typedef struct {
-    vec3* p_buf;
-    vec3* n_buf;
-    vec3* c_buf;
-
-    size_t count;
-} VertexBuffer;
+    unsigned int index_start;
+    unsigned int index_count;
+} Mesh;
 
 EXTERN_C void rng_init(size_t image_width, size_t image_height, int seed);
 EXTERN_C void rng_deinit(void);

@@ -1,17 +1,18 @@
 const std = @import("std");
 const core = @import("core.zig");
 const al = @import("linalg.zig");
+const rc = @import("../gpu/raycast.zig");
 
 pub const MeshAtlas = struct {
     vb: core.HostVertexBuffer,
     indices: std.ArrayList(u32),
-    meshes: std.ArrayList(Mesh),
+    meshes: std.ArrayList(rc.Mesh),
 
     pub fn init(allocator: std.mem.Allocator) MeshAtlas {
         return .{
             .vb = core.HostVertexBuffer.init(allocator),
             .indices = std.ArrayList(u32).init(allocator),
-            .meshes = std.ArrayList(Mesh).init(allocator),
+            .meshes = std.ArrayList(rc.Mesh).init(allocator),
         };
     }
 
@@ -21,7 +22,7 @@ pub const MeshAtlas = struct {
         self.meshes.deinit();
     }
 
-    pub fn parse_mesh_from_file(self: *MeshAtlas, filename: []const u8) !*Mesh {
+    pub fn parse_mesh_from_file(self: *MeshAtlas, filename: []const u8) !*rc.Mesh {
         const file = try std.fs.cwd().openFile(
             filename,
             .{},
@@ -69,32 +70,13 @@ pub const MeshAtlas = struct {
             _ = lines_iter.next();
         }
 
-        const mesh = Mesh{
-            .vertex_start = vertex_start,
-            .vertex_count = self.vb.pos_buf.items.len - vertex_start,
-            .index_start = index_start,
-            .index_count = self.indices.items.len - index_start,
+        const mesh = rc.Mesh{
+            .index_start = @as(c_uint, @intCast(index_start)),
+            .index_count = @as(c_uint, @intCast(self.indices.items.len - index_start)),
         };
 
         try self.meshes.append(mesh);
         return &self.meshes.items[self.meshes.items.len - 1];
 
     }
-};
-
-pub const Mesh = struct {
-    index_start: usize,
-    index_count: usize,
-    vertex_start: usize,
-    vertex_count: usize,
-
-    pub fn empty() !Mesh {
-        return Mesh{
-            .index_start = 0,
-            .index_count = 0,
-            .vertex_start = 0,
-            .vertex_count = 0,
-        };
-    }
-
 };

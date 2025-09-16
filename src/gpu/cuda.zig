@@ -7,7 +7,7 @@ pub fn checkCuda(ret: c_int) !void {
     if (ret == 0) {
         return;
     } else {
-        std.debug.print("Unknown cuda error caught {}", .{ret});
+        std.debug.print("Unknown cuda error caught {}\n", .{ret});
         return error.cudaUnknownError;
     }
 }
@@ -105,7 +105,6 @@ pub fn CudaBuffer(comptime ValueT: type) type {
         }
 
         pub fn fromHost(self: *Self, src: []const ValueT) !void {
-            std.debug.print("self.len {} src.len {}\n", .{self.len, src.len});
             if (src.len > self.len) return error.BufferOverflow;
             try checkCuda(cudaMemcpy(
                 self.dev_ptr,
@@ -127,6 +126,7 @@ pub fn CudaBuffer(comptime ValueT: type) type {
         pub fn view(self: *const Self, comptime Rank: usize, dims: [Rank]usize) !TensorView(ValueT, Rank) {
             const _dims = TensorDims(Rank).init(dims);
             if (_dims.size() != self.len) {
+                std.debug.print("_dims.size {} self.len {}\n", .{_dims.size(), self.len});
                 return error.InvalidViewDimensions;
             }
             return TensorView(ValueT, Rank).init(self, dims);
