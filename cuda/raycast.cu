@@ -52,6 +52,7 @@ typedef struct {
     VertexBuffers vb;
     TensorView<uint32_t, 1> indices;
     TensorView<Mesh, 1> meshes;
+    TensorView<Material, 1> materials;
 } Scene;
 
 __device__ inline vec3 tv_get_vec3(TensorView<float, 2> tv, size_t i) {
@@ -267,7 +268,7 @@ __device__ bool mesh_hit(
 }
 
 
-__device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres, float ray_tmin, float ray_tmax, HitRecord* hit_record) {
+__device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres, TensorView<Material, 1> d_materials, float ray_tmin, float ray_tmax, HitRecord* hit_record) {
     bool hit = false;
     float closest_so_far = ray_tmax;
     for (size_t i = 0u; i < d_spheres.shape[0]; ++i) {
@@ -278,7 +279,7 @@ __device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres, flo
             hit = true;
             closest_so_far = temp_hit.t;
             hit_record->t = temp_hit.t;
-            hit_record->material = sphere->material;
+            hit_record->material = d_materials.at(sphere->material_idx);
             hit_record->normal = temp_hit.normal;
             hit_record->point = temp_hit.point;
             hit_record->front_face = temp_hit.front_face;
@@ -311,7 +312,7 @@ __device__ vec3 ray_color(
         float tmax = INFINITY;
 
         HitRecord sphere_hitrec;
-        if (spheres_hit(&current_ray, scene->spheres, 0.001f, tmax, &sphere_hitrec)) {
+        if (spheres_hit(&current_ray, scene->spheres, scene->materials, 0.001f, tmax, &sphere_hitrec)) {
             best_hit = sphere_hitrec;
             tmax = sphere_hitrec.t;
             hit_anything = true;
@@ -429,14 +430,16 @@ EXTERN_C void launch_raycast(TensorView<char, 3> d_img,
                              TensorView<float, 2> d_vb_color,
                              TensorView<float, 2> d_vb_norm,
                              TensorView<uint32_t, 1> d_indices,
-                             TensorView<Mesh, 1> d_meshes) {
+                             TensorView<Mesh, 1> d_meshes,
+                             TensorView<Material, 1> d_materials) {
     // d_img: height, width 3
     // d_spheres: n_spheres
     // d_vb_pos: n_vertex, 3
     // d_vb_color: n_vertex, 3
     // d_vb_norm: n_vertex, 3
     // d_indices: n_mesh_indices
-    // d_meshes: n_meshes, 2 (start, end)
+    // d_meshes: n_meshes
+    // d_materials: n_materials
     Scene scene = Scene{
         .spheres = d_spheres,
         .vb = VertexBuffers {
@@ -446,6 +449,7 @@ EXTERN_C void launch_raycast(TensorView<char, 3> d_img,
         },
         .indices = d_indices,
         .meshes = d_meshes,
+        .materials = d_materials,
     };
 
     dim3 block(16, 16);

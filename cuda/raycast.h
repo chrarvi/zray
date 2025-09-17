@@ -52,7 +52,7 @@ typedef struct {
 typedef struct {
     vec3 center;
     float radius;
-    Material material;
+    unsigned int material_idx;
 } Sphere;
 
 typedef struct {

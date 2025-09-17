@@ -15,22 +15,12 @@ const RNG_SEED: i32 = 1234;
 const AtomicUsize = std.atomic.Value(usize);
 const AtomicBool = std.atomic.Value(bool);
 
-const SIMULATION_FRAMERATE: f32 = 30.0;
-const RENDERING_FRAMERATE: f32 = 60.0;
+const SIMULATION_FRAMERATE: f32 = 10.0;
+const RENDERING_FRAMERATE: f32 = 10.0;
 
 const NUM_SPHERES = 4;
 
 pub fn fill_world(world: *core.World) !void {
-    const metal_mat = rc.Material{
-        .kind = rc.MaterialKind.Metal,
-        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
-        .fuzz = 0.05,
-    };
-    const ground_mat = rc.Material{
-        .kind = rc.MaterialKind.Lambertian,
-        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
-    };
-
     const world_width = 50.0;
     const world_depth = 50.0;
     const world_height = 0.0;
@@ -45,7 +35,7 @@ pub fn fill_world(world: *core.World) !void {
         const r = rand.float(f32) * rad_max;
         const y = (rand.float(f32) - 0.5) * world_height + r / 2.0;
         const mat_idx = rand.intRangeAtMost(usize, 0, 2);
-        var mat = metal_mat;
+        var mat: rc.Material = undefined;
         if (mat_idx == 0) {
             mat = rc.Material{
                 .kind = rc.MaterialKind.Lambertian,
@@ -76,9 +66,17 @@ pub fn fill_world(world: *core.World) !void {
             };
         }
 
-        try world.spheres.append(.{ .center = .{ .x = x, .y = y, .z = z }, .radius = r, .material = mat });
+        try world.materials.append(mat);
+        try world.spheres.append(.{ .center = .{ .x = x, .y = y, .z = z }, .radius = r, .material_idx = @as(u32, @intCast(world.materials.items.len - 1 ))});
     }
-    try world.spheres.append(.{ .center = .{ .x = 0.0, .y = -1000.5, .z = -1.0 }, .radius = 1000.0, .material = ground_mat });
+
+    const ground_mat = rc.Material{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
+    };
+    try world.materials.append(ground_mat);
+
+    try world.spheres.append(.{ .center = .{ .x = 0.0, .y = -1000.5, .z = -1.0 }, .radius = 1000.0, .material_idx = @as(u32, @intCast(world.materials.items.len - 1 ))});
 
     var icosa_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/icosahedron.txt");
     var cube_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/cube.txt");
@@ -132,7 +130,7 @@ pub fn main() !void {
             .inv_proj = camera.inv_proj,
         },
         .world = try core.World.init(gpa),
-        .world_dev = try gpu.DeviceWorld.init(NUM_SPHERES + 1, (36 + 60) * 3, (36 + 60), 2),
+        .world_dev = try gpu.DeviceWorld.init(NUM_SPHERES + 1, (36 + 60) * 3, (36 + 60), 2, 5),
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
@@ -145,6 +143,7 @@ pub fn main() !void {
     try shared.world_dev.vb.fromHost(&shared.world.mesh_atlas.vb);
     try shared.world_dev.indices.fromHost(shared.world.mesh_atlas.indices.items);
     try shared.world_dev.meshes.fromHost(shared.world.mesh_atlas.meshes.items);
+    try shared.world_dev.materials.fromHost(shared.world.materials.items);
 
     var simulator = sim.Simulator.init(SIMULATION_FRAMERATE, &shared);
     try simulator.start();
