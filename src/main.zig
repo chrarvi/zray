@@ -132,7 +132,7 @@ pub fn main() !void {
             .inv_proj = camera.inv_proj,
         },
         .world = try core.World.init(gpa),
-        .world_dev = try gpu.DeviceWorld.init(NUM_SPHERES + 1, (36 + 60) * 3, (36 + 60), 2, 5),
+        .world_dev = try gpu.DeviceWorld.init(NUM_SPHERES + 1, (36 + 60) * 4, (36 + 60), 2, 5),
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();

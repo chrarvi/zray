@@ -131,4 +131,26 @@ inline __device__ vec4 rmmul(const vec4 v, const float M[4][4]) {
     return r;
 }
 
+inline __device__ vec3 bary_lerp(const vec3& a, const vec3& b, const vec3& c, float u, float v) {
+    // barycentric weights: w = 1 - u - v
+    float w = 1.0f - u - v;
+    return w * a + u * b + v * c;
+}
+
+inline __device__ bool range_constains(float v, float min, float max) {
+    return min <= v && v <= max;
+}
+
+inline __device__ bool range_surrounds(float v, float min, float max) {
+    return min < v && v < max;
+}
+
+inline __device__ vec3 color_linear_to_gamma(vec3 c) {
+    return vec3{
+        sqrtf(fmaxf(0.0, c.x)),
+        sqrtf(fmaxf(0.0, c.y)),
+        sqrtf(fmaxf(0.0, c.z))
+    };
+}
+
 #endif // MATH_CUH_

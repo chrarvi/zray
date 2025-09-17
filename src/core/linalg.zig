@@ -1,4 +1,5 @@
 pub const Vec3 = [3]f32;
+pub const Vec4 = [4]f32;
 pub const Mat4 = [4][4]f32;
 
 pub const PI: f32 = 3.14159265358979323846264338327950288;

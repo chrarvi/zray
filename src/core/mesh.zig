@@ -35,7 +35,7 @@ pub const MeshAtlas = struct {
         const num_tris: usize = try std.fmt.parseInt(usize, try reader.readUntilDelimiter(&tris_buf.buffer, '\n'), 10);
 
         // TODO: use scratch arena here
-        var bytes = try std.BoundedArray(u8, 10000 * 1024).init(10000 * 1024);
+        var bytes = try std.BoundedArray(u8, 1000 * 1024).init(1000 * 1024);
         _ = try reader.readAll(&bytes.buffer);
 
         var lines_iter = std.mem.splitScalar(u8, &bytes.buffer, '\n');
@@ -48,21 +48,23 @@ pub const MeshAtlas = struct {
                 const pos_line = lines_iter.next().?;
                 var pos_iter = std.mem.splitScalar(u8, pos_line, ' ');
 
-                const vert: al.Vec3 = .{
+                const vert: al.Vec4 = .{
                     try std.fmt.parseFloat(f32, pos_iter.next().?),
                     try std.fmt.parseFloat(f32, pos_iter.next().?),
                     try std.fmt.parseFloat(f32, pos_iter.next().?),
+                    1.0,
                 };
                 const norm_line = lines_iter.next().?;
                 var norm_iter = std.mem.splitScalar(u8, norm_line, ' ');
 
-                const normal: al.Vec3 = .{
+                const normal: al.Vec4 = .{
                     try std.fmt.parseFloat(f32, norm_iter.next().?),
                     try std.fmt.parseFloat(f32, norm_iter.next().?),
                     try std.fmt.parseFloat(f32, norm_iter.next().?),
+                    0.0,
                 };
 
-                const col: al.Vec3 = .{ 1.0, 1.0, 1.0 };
+                const col: al.Vec4 = .{ 1.0, 1.0, 1.0, 1.0 };
 
                 try self.vb.push_vertex(vert, col, normal);
                 try self.indices.append(@as(u32, @intCast(vertex_start + t_idx * 3 + v_idx)));

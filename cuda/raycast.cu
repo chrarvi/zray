@@ -59,12 +59,6 @@ __device__ inline vec3 tv_get_vec3(TensorView<float, 2> tv, size_t i) {
     return vec3{ tv.at(i, 0), tv.at(i, 1), tv.at(i, 2) };
 }
 
-__device__ inline vec3 bary_lerp(const vec3& a, const vec3& b, const vec3& c, float u, float v) {
-    // barycentric weights: w = 1 - u - v
-    float w = 1.0f - u - v;
-    return w * a + u * b + v * c;
-}
-
 __global__ void setup_rng(curandState* state, int width, int height, int seed) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -74,21 +68,8 @@ __global__ void setup_rng(curandState* state, int width, int height, int seed) {
     curand_init(seed, idx, 0, &state[idx]);
 }
 
-__device__ bool range_constains(float v, float min, float max) {
-    return min <= v && v <= max;
-}
-
-__device__ bool range_surrounds(float v, float min, float max) {
-    return min < v && v < max;
-}
-
 __device__ vec3 ray_at(const Ray* ray, float t) {
     return ray->origin + t * ray->dir;
-}
-
-__device__ float color_linear_to_gamma(float comp) {
-    if (comp > 0.0f) return sqrtf(comp);
-    return 0.0f;
 }
 
 __device__ bool scatter_lambertian(const Ray* ray, const HitRecord* hit_record, curandState* local_state, vec3* attenuation, Ray* scattered) {
@@ -399,15 +380,11 @@ __global__ void render_kernel(
     }
 
     color = color / (float)cam->samples_per_pixel;
+    color = color_linear_to_gamma(color);
 
-    // gamma correction
-    float r = color_linear_to_gamma(color.x);
-    float g = color_linear_to_gamma(color.y);
-    float b = color_linear_to_gamma(color.z);
-
-    d_img.at(y, x, 0) = (unsigned char)(255.0f * clamp(r, 0.0f, 0.999f));
-    d_img.at(y, x, 1) = (unsigned char)(255.0f * clamp(g, 0.0f, 0.999f));
-    d_img.at(y, x, 2) = (unsigned char)(255.0f * clamp(b, 0.0f, 0.999f));
+    d_img.at(y, x, 0) = (unsigned char)(255.0f * clamp(color.x, 0.0f, 0.999f));
+    d_img.at(y, x, 1) = (unsigned char)(255.0f * clamp(color.y, 0.0f, 0.999f));
+    d_img.at(y, x, 2) = (unsigned char)(255.0f * clamp(color.z, 0.0f, 0.999f));
 }
 
 curandState *d_rng_state;
@@ -460,6 +437,7 @@ EXTERN_C void launch_raycast(TensorView<char, 3> d_img,
 
     render_kernel<<<grid, block>>>(d_img, cam, scene, d_rng_state);
     CHECK_CUDA(cudaPeekAtLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 EXTERN_C void rng_deinit(void) {
