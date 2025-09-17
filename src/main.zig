@@ -80,11 +80,11 @@ pub fn fill_world(world: *core.World) !void {
     }
     try world.spheres.append(.{ .center = .{ .x = 0.0, .y = -1000.5, .z = -1.0 }, .radius = 1000.0, .material = ground_mat });
 
-    const icosa_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/icosahedron.txt");
-    const cube_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/cube.txt");
-    _ = icosa_mesh;
-    _ = cube_mesh;
+    var icosa_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/icosahedron.txt");
+    var cube_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/cube.txt");
 
+    _ = al.mat4_translate(&icosa_mesh.model, al.Vec3{ 1.0, 1.0, 0.0 });
+    _ = al.mat4_translate(&cube_mesh.model, al.Vec3{ -1.0, 1.0, 0.0 });
 }
 
 pub fn main() !void {
@@ -132,7 +132,7 @@ pub fn main() !void {
             .inv_proj = camera.inv_proj,
         },
         .world = try core.World.init(gpa),
-        .world_dev = try gpu.DeviceWorld.init(NUM_SPHERES+1, (36+60)*3, (36+60), 2),
+        .world_dev = try gpu.DeviceWorld.init(NUM_SPHERES + 1, (36 + 60) * 3, (36 + 60), 2),
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
@@ -144,7 +144,7 @@ pub fn main() !void {
     try shared.world_dev.spheres.fromHost(shared.world.spheres.items);
     try shared.world_dev.vb.fromHost(&shared.world.mesh_atlas.vb);
     try shared.world_dev.indices.fromHost(shared.world.mesh_atlas.indices.items);
-    try shared.world_dev.mesh_ranges.fromHost(shared.world.mesh_atlas.meshes.items);
+    try shared.world_dev.meshes.fromHost(shared.world.mesh_atlas.meshes.items);
 
     var simulator = sim.Simulator.init(SIMULATION_FRAMERATE, &shared);
     try simulator.start();

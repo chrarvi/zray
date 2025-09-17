@@ -51,7 +51,7 @@ typedef struct {
     TensorView<Sphere, 1> spheres;
     VertexBuffers vb;
     TensorView<uint32_t, 1> indices;
-    TensorView<Mesh, 1> mesh_range;
+    TensorView<Mesh, 1> meshes;
 } Scene;
 
 __device__ inline vec3 tv_get_vec3(TensorView<float, 2> tv, size_t i) {
@@ -187,7 +187,7 @@ __device__ bool mesh_hit(
     const Ray* ray,
     const VertexBuffers* vb,
     TensorView<uint32_t, 1> indices,
-    TensorView<Mesh, 1> mesh_ranges,
+    TensorView<Mesh, 1> meshes,
     float ray_tmin, float ray_tmax,
     HitRecord* hit_record)
 {
@@ -197,9 +197,10 @@ __device__ bool mesh_hit(
     bool hit_anything = false;
     float closest = ray_tmax;
 
-    for (size_t m = 0; m < mesh_ranges.shape[0]; ++m) {
-        uint32_t start = mesh_ranges.at(m).index_start;
-        uint32_t end   = start + mesh_ranges.at(m).index_count;
+    for (size_t m = 0; m < meshes.shape[0]; ++m) {
+        Mesh* mesh = &meshes.at(m);
+        uint32_t start = mesh->index_start;
+        uint32_t end   = start + mesh->index_count;
 
         for (size_t i = start; i + 2 < end; i+=3) {
             uint32_t i0 = indices.at(i+0);
@@ -210,11 +211,23 @@ __device__ bool mesh_hit(
             vec3 p1 = tv_get_vec3(vb->pos, i1);
             vec3 p2 = tv_get_vec3(vb->pos, i2);
 
+            vec4 p0_h = vec4{p0.x, p0.y, p0.z, 1.0};
+            vec4 p1_h = vec4{p1.x, p1.y, p1.z, 1.0};
+            vec4 p2_h = vec4{p2.x, p2.y, p2.z, 1.0};
+
+            vec4 p0_world_h = lmmul(mesh->model, p0_h);
+            vec4 p1_world_h = lmmul(mesh->model, p1_h);
+            vec4 p2_world_h = lmmul(mesh->model, p2_h);
+
+            vec3 p0_world = vec3{p0_world_h.x, p0_world_h.y, p0_world_h.z};
+            vec3 p1_world = vec3{p1_world_h.x, p1_world_h.y, p1_world_h.z};
+            vec3 p2_world = vec3{p2_world_h.x, p2_world_h.y, p2_world_h.z};
+
             float t, u, v;
             vec3 tri_normal;
             bool front_face;
 
-            if (triangle_hit(p0, p1, p2, ray, ray_tmin, closest, &t, &u, &v, &tri_normal, &front_face)) {
+            if (triangle_hit(p0_world, p1_world, p2_world, ray, ray_tmin, closest, &t, &u, &v, &tri_normal, &front_face)) {
                 hit_anything = true;
                 closest = t;
                 vec3 point = ray_at(ray, t);
@@ -304,7 +317,7 @@ __device__ vec3 ray_color(
             hit_anything = true;
         }
         HitRecord mesh_hitrec;
-        if (mesh_hit(&current_ray, &scene->vb, scene->indices, scene->mesh_range, 0.001f, tmax, &mesh_hitrec)) {
+        if (mesh_hit(&current_ray, &scene->vb, scene->indices, scene->meshes, 0.001f, tmax, &mesh_hitrec)) {
             best_hit = mesh_hitrec;
             tmax = mesh_hitrec.t;
             hit_anything = true;
@@ -363,16 +376,16 @@ __global__ void render_kernel(
 
         ndc_y = -ndc_y;
 
-        float4 clip = make_float4(ndc_x, ndc_y, -1.0f, 1.0f);
+        vec4 clip = vec4{ndc_x, ndc_y, -1.0f, 1.0f};
 
-        float4 cam_h = mmul(cam->inv_proj, clip);
+        vec4 cam_h = lmmul(cam->inv_proj, clip);
         vec3 dir_cam = normalize(vec3{ cam_h.x, cam_h.y, cam_h.z } / cam_h.w);
 
-        float4 origin_cam = make_float4(0, 0, 0, 1);
-        float4 dir_cam4   = make_float4(dir_cam.x, dir_cam.y, dir_cam.z, 0);
+        vec4 origin_cam = vec4{0, 0, 0, 1};
+        vec4 dir_cam4   = vec4{dir_cam.x, dir_cam.y, dir_cam.z, 0};
 
-        float4 origin_world4 = mmul(cam->camera_to_world, origin_cam);
-        float4 dir_world4    = mmul(cam->camera_to_world, dir_cam4);
+        vec4 origin_world4 = lmmul(cam->camera_to_world, origin_cam);
+        vec4 dir_world4    = lmmul(cam->camera_to_world, dir_cam4);
 
         Ray ray = Ray {
             .origin = vec3{ origin_world4.x, origin_world4.y, origin_world4.z },
@@ -409,20 +422,21 @@ EXTERN_C void rng_init(size_t image_height, size_t image_width, int seed) {
     CHECK_CUDA(cudaDeviceSynchronize());
 }
 
-EXTERN_C void launch_raycast(TensorView<char, 3> d_img, const CameraData *cam,
+EXTERN_C void launch_raycast(TensorView<char, 3> d_img,
+                             const CameraData *cam,
                              TensorView<Sphere, 1> d_spheres,
                              TensorView<float, 2> d_vb_pos,
                              TensorView<float, 2> d_vb_color,
                              TensorView<float, 2> d_vb_norm,
                              TensorView<uint32_t, 1> d_indices,
-                             TensorView<Mesh, 1> d_mesh_ranges) {
+                             TensorView<Mesh, 1> d_meshes) {
     // d_img: height, width 3
     // d_spheres: n_spheres
     // d_vb_pos: n_vertex, 3
     // d_vb_color: n_vertex, 3
     // d_vb_norm: n_vertex, 3
     // d_indices: n_mesh_indices
-    // d_mesh_ranges: n_meshes, 2 (start, end)
+    // d_meshes: n_meshes, 2 (start, end)
     Scene scene = Scene{
         .spheres = d_spheres,
         .vb = VertexBuffers {
@@ -431,7 +445,7 @@ EXTERN_C void launch_raycast(TensorView<char, 3> d_img, const CameraData *cam,
             .color = d_vb_color,
         },
         .indices = d_indices,
-        .mesh_range = d_mesh_ranges,
+        .meshes = d_meshes,
     };
 
     dim3 block(16, 16);

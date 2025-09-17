@@ -19,6 +19,13 @@ typedef struct {
 } vec3;
 
 typedef struct {
+    float x;
+    float y;
+    float z;
+    float w;
+} vec4;
+
+typedef struct {
     unsigned int image_width;
     unsigned int image_height;
     float focal_length;
@@ -51,6 +58,7 @@ typedef struct {
 typedef struct {
     unsigned int index_start;
     unsigned int index_count;
+    mat4 model;
 } Mesh;
 
 EXTERN_C void rng_init(size_t image_width, size_t image_height, int seed);

@@ -73,6 +73,7 @@ pub const MeshAtlas = struct {
         const mesh = rc.Mesh{
             .index_start = @as(c_uint, @intCast(index_start)),
             .index_count = @as(c_uint, @intCast(self.indices.items.len - index_start)),
+            .model = al.mat4_ident(),
         };
 
         try self.meshes.append(mesh);

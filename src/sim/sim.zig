@@ -73,7 +73,7 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
             try wd.vb.color_buf.view(2, .{ wd.vb.color_buf.len / 3, 3 }),
             try wd.vb.normal_buf.view(2, .{ wd.vb.normal_buf.len / 3, 3 }),
             try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
-            try wd.mesh_ranges.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
+            try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
         );
         try shared.frame_buffer_dev.toHost(shared.frame_buffers_host[write_idx]);
 

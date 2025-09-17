@@ -113,12 +113,21 @@ inline  __device__ vec3 reflect(vec3 v, vec3 n) {
     return v - 2.0f * dot(v, n) * n;
 }
 
-inline __device__ float4 mmul(const float M[4][4], const float4& v) {
-    float4 r;
+inline __device__ vec4 lmmul(const float M[4][4], const vec4 v) {
+    vec4 r;
     r.x = M[0][0] * v.x + M[0][1] * v.y + M[0][2] * v.z + M[0][3] * v.w;
     r.y = M[1][0] * v.x + M[1][1] * v.y + M[1][2] * v.z + M[1][3] * v.w;
     r.z = M[2][0] * v.x + M[2][1] * v.y + M[2][2] * v.z + M[2][3] * v.w;
     r.w = M[3][0] * v.x + M[3][1] * v.y + M[3][2] * v.z + M[3][3] * v.w;
+    return r;
+}
+
+inline __device__ vec4 rmmul(const vec4 v, const float M[4][4]) {
+    vec4 r;
+    r.x = M[0][0] * v.x + M[1][0] * v.y + M[2][0] * v.z + M[3][0] * v.w;
+    r.y = M[0][1] * v.x + M[1][1] * v.y + M[2][1] * v.z + M[3][1] * v.w;
+    r.z = M[0][2] * v.x + M[1][2] * v.y + M[2][2] * v.z + M[3][2] * v.w;
+    r.w = M[0][3] * v.x + M[1][3] * v.y + M[2][3] * v.z + M[3][3] * v.w;
     return r;
 }
 

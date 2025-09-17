@@ -23,5 +23,5 @@ pub extern fn launch_raycast(
     d_vb_color: cu.TensorView(f32, 2),
     d_vb_normal: cu.TensorView(f32, 2),
     d_indices: cu.TensorView(u32, 1),
-    d_mesh_ranges: cu.TensorView(rc.Mesh, 1),
+    d_meshes: cu.TensorView(rc.Mesh, 1),
 ) void;
