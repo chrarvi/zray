@@ -15,8 +15,8 @@ const RNG_SEED: i32 = 1234;
 const AtomicUsize = std.atomic.Value(usize);
 const AtomicBool = std.atomic.Value(bool);
 
-const SIMULATION_FRAMERATE: f32 = 10.0;
-const RENDERING_FRAMERATE: f32 = 10.0;
+const SIMULATION_FRAMERATE: f32 = 30.0;
+const RENDERING_FRAMERATE: f32 = 30.0;
 
 const NUM_SPHERES = 4;
 
@@ -67,7 +67,7 @@ pub fn fill_world(world: *core.World) !void {
         }
 
         try world.materials.append(mat);
-        try world.spheres.append(.{ .center = .{ .x = x, .y = y, .z = z }, .radius = r, .material_idx = @as(u32, @intCast(world.materials.items.len - 1 ))});
+        try world.spheres.append(.{ .center = .{ .x = x, .y = y, .z = z }, .radius = r, .material_idx = @as(u32, @intCast(world.materials.items.len - 1)) });
     }
 
     const ground_mat = rc.Material{
@@ -76,10 +76,12 @@ pub fn fill_world(world: *core.World) !void {
     };
     try world.materials.append(ground_mat);
 
-    try world.spheres.append(.{ .center = .{ .x = 0.0, .y = -1000.5, .z = -1.0 }, .radius = 1000.0, .material_idx = @as(u32, @intCast(world.materials.items.len - 1 ))});
+    try world.spheres.append(.{ .center = .{ .x = 0.0, .y = -1000.5, .z = -1.0 }, .radius = 1000.0, .material_idx = @as(u32, @intCast(world.materials.items.len - 1)) });
 
     var icosa_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/icosahedron.txt");
+    icosa_mesh.material_idx = 0;
     var cube_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/cube.txt");
+    cube_mesh.material_idx = 1;
 
     _ = al.mat4_translate(&icosa_mesh.model, al.Vec3{ 1.0, 1.0, 0.0 });
     _ = al.mat4_translate(&cube_mesh.model, al.Vec3{ -1.0, 1.0, 0.0 });

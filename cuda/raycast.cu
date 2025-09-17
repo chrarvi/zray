@@ -189,6 +189,7 @@ __device__ bool mesh_hit(
     const VertexBuffers* vb,
     TensorView<uint32_t, 1> indices,
     TensorView<Mesh, 1> meshes,
+    TensorView<Material, 1> materials,
     float ray_tmin, float ray_tmax,
     HitRecord* hit_record)
 {
@@ -202,6 +203,8 @@ __device__ bool mesh_hit(
         Mesh* mesh = &meshes.at(m);
         uint32_t start = mesh->index_start;
         uint32_t end   = start + mesh->index_count;
+
+        Material* material = &materials.at(mesh->material_idx);
 
         for (size_t i = start; i + 2 < end; i+=3) {
             uint32_t i0 = indices.at(i+0);
@@ -255,11 +258,10 @@ __device__ bool mesh_hit(
                 hit_record->normal     = n_shade;
                 hit_record->front_face = front_face;
 
-                // TODO: other materials? Need to upload more proper meshes that have materials for that.
-                hit_record->material.kind   = MAT_LAMBERTIAN;
-                hit_record->material.albedo = albedo;
-                hit_record->material.emit   = vec3{0,0,0};
-                hit_record->material.fuzz   = 0.0f;
+                hit_record->material.albedo = material->albedo;
+                hit_record->material.emit = material->emit;
+                hit_record->material.fuzz = material->fuzz;
+                hit_record->material.kind = material->kind;
             }
         }
     }
@@ -318,7 +320,7 @@ __device__ vec3 ray_color(
             hit_anything = true;
         }
         HitRecord mesh_hitrec;
-        if (mesh_hit(&current_ray, &scene->vb, scene->indices, scene->meshes, 0.001f, tmax, &mesh_hitrec)) {
+        if (mesh_hit(&current_ray, &scene->vb, scene->indices, scene->meshes, scene->materials, 0.001f, tmax, &mesh_hitrec)) {
             best_hit = mesh_hitrec;
             tmax = mesh_hitrec.t;
             hit_anything = true;

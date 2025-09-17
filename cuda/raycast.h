@@ -59,6 +59,7 @@ typedef struct {
     unsigned int index_start;
     unsigned int index_count;
     mat4 model;
+    unsigned int material_idx;
 } Mesh;
 
 EXTERN_C void rng_init(size_t image_width, size_t image_height, int seed);
