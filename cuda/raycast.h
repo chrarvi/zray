@@ -40,7 +40,8 @@ typedef enum {
     MAT_LAMBERTIAN = 0,
     MAT_METAL = 1,
     MAT_EMISSIVE = 2,
-    MAT_WIREFRAME = 3
+    MAT_WIREFRAME = 3,
+    MAT_DIELECTRIC = 4
 } MaterialKind;
 
 typedef struct {
@@ -48,6 +49,7 @@ typedef struct {
     vec3 albedo;
     float fuzz;
     vec3 emit;
+    float refractive_index;
 } Material;
 
 typedef struct {

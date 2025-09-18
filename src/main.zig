@@ -27,8 +27,9 @@ pub fn fill_world(world: *core.World) !void {
     const rad_max = 2.0;
 
     const wireframe_mat = rc.Material {
-        .kind = rc.MaterialKind.Wireframe,
-        .albedo = .{.x=0.8, .y=0.8, .z=0.8},
+        .kind = rc.MaterialKind.Dialectric,
+        .refractive_index = 1.0,
+        .albedo = .{.x=0.5, .y=0.5, .z=0.5},
     };
     try world.materials.append(wireframe_mat);
 
@@ -45,7 +46,8 @@ pub fn fill_world(world: *core.World) !void {
         var mat: rc.Material = undefined;
         if (mat_idx == 0) {
             mat = rc.Material{
-                .kind = rc.MaterialKind.Lambertian,
+                .kind = rc.MaterialKind.Dialectric,
+                .refractive_index = 1.5,
                 .albedo = .{
                     .x = rand.float(f32),
                     .y = rand.float(f32),
@@ -90,9 +92,9 @@ pub fn fill_world(world: *core.World) !void {
     try world.spheres.append(.{ .center = .{ .x = 0.0, .y = -1000.5, .z = -1.0 }, .radius = 1000.0, .material_idx = @as(u32, @intCast(world.materials.items.len - 1)) });
 
     var icosa_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/icosahedron.txt");
-    icosa_mesh.material_idx = 0;
+    icosa_mesh.material_idx = 1;
     var cube_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/cube.txt");
-    cube_mesh.material_idx = 1;
+    cube_mesh.material_idx = 0;
 
     _ = al.mat4_translate(&icosa_mesh.model, al.Vec3{ 1.0, 1.0, 0.0 });
     _ = al.mat4_translate(&cube_mesh.model, al.Vec3{ -1.0, 1.0, 0.0 });

@@ -59,6 +59,9 @@ inline  __device__ vec3 normalize(vec3 v) {
 inline  __device__ float dot(vec3 a, vec3 b) {
     return a.x*b.x + a.y* b.y + a.z*b.z;
 }
+inline __device__ float snorm(vec3 v) {
+    return dot(v, v);
+}
 
 inline __device__ vec3 cross(vec3 a, vec3 b) {
     return vec3 {
@@ -66,6 +69,14 @@ inline __device__ vec3 cross(vec3 a, vec3 b) {
         a.z*b.x - a.x*b.z,
         a.x*b.y - a.y*b.x
     };
+}
+
+inline __device__ vec3 fminf(vec3 v, float c) {
+  return {
+      fminf(v.x, c),
+      fminf(v.y, c),
+      fminf(v.z, c),
+  };
 }
 
 inline  __device__ float clamp(float v, float mn, float mx) {
@@ -111,6 +122,20 @@ inline  __device__ vec3 random_on_hemisphere(curandState* local_state, const vec
 
 inline  __device__ vec3 reflect(vec3 v, vec3 n) {
     return v - 2.0f * dot(v, n) * n;
+}
+
+inline __device__ vec3 refract(vec3 uv, vec3 n, float etai_over_etat) {
+    float cos_theta = fminf(dot(-1.0 * uv, n), 1.0);
+    vec3 r_out_perp = etai_over_etat * (uv + cos_theta * n);
+    vec3 r_out_para = -1.0 * sqrtf(fabsf(1.0 - snorm(r_out_perp))) * n;
+    return r_out_perp + r_out_para;
+}
+
+inline __device__ float reflectance(float cosine, float ref_idx) {
+    // Schlick's approximation
+    float r0 = (1.0f - ref_idx) / (1.0f + ref_idx);
+    r0 = r0 * r0;
+    return r0 + (1.0f - r0) * powf(1.0f - cosine, 5);
 }
 
 inline __device__ vec4 lmmul(const float M[4][4], const vec4 v) {

@@ -11,6 +11,7 @@ pub const MaterialKind = struct {
     pub const Metal = rc.MAT_METAL;
     pub const Emissive = rc.MAT_EMISSIVE;
     pub const Wireframe = rc.MAT_WIREFRAME;
+    pub const Dialectric = rc.MAT_DIELECTRIC;
 };
 
 pub const rng_init = rc.rng_init;

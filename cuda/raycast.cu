@@ -324,6 +324,27 @@ __device__ ScatterResult scatter_material(
             result.attenuation = is_edge ? vec3{0,0,0} : mat.albedo;
             break;
         }
+        case MAT_DIELECTRIC: {
+            result.attenuation = {1.0f, 1.0f, 1.0f}; // no color loss
+            result.did_scatter = true;
+            float eta = hit.front_face ? (1.0f / mat.refractive_index) : mat.refractive_index;
+            vec3 unit_dir = normalize(in_ray.dir);
+            float cos_theta = fminf(dot(-1.0 * unit_dir, hit.normal), 1.0);
+            float sin_theta = sqrtf(1.0 - cos_theta * cos_theta);
+
+            bool cannot_refract = eta * sin_theta > 1.0;
+
+            vec3 direction;
+            if (cannot_refract || reflectance(cos_theta, eta) > curand_uniform(rng)) {
+                direction = reflect(unit_dir, hit.normal);
+            } else {
+                direction = refract(unit_dir, hit.normal, eta);
+            }
+
+            result.scattered_ray.origin = hit.point;
+            result.scattered_ray.dir    = direction;
+            break;
+        }
     }
 
     return result;
