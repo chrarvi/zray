@@ -39,7 +39,8 @@ typedef struct {
 typedef enum {
     MAT_LAMBERTIAN = 0,
     MAT_METAL = 1,
-    MAT_EMISSIVE = 2
+    MAT_EMISSIVE = 2,
+    MAT_WIREFRAME = 3
 } MaterialKind;
 
 typedef struct {

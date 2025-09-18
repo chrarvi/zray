@@ -26,6 +26,13 @@ pub fn fill_world(world: *core.World) !void {
     const world_height = 0.0;
     const rad_max = 2.0;
 
+    const wireframe_mat = rc.Material {
+        .kind = rc.MaterialKind.Wireframe,
+        .albedo = .{.x=0.8, .y=0.8, .z=0.8},
+    };
+    try world.materials.append(wireframe_mat);
+
+
     var prng = std.Random.DefaultPrng.init(123456);
     var rand = prng.random();
     const num_spheres = NUM_SPHERES;
@@ -67,7 +74,11 @@ pub fn fill_world(world: *core.World) !void {
         }
 
         try world.materials.append(mat);
-        try world.spheres.append(.{ .center = .{ .x = x, .y = y, .z = z }, .radius = r, .material_idx = @as(u32, @intCast(world.materials.items.len - 1)) });
+        try world.spheres.append(.{
+            .center = .{ .x = x, .y = y, .z = z },
+            .radius = r,
+            .material_idx = @as(u32, @intCast(world.materials.items.len - 1)),
+        });
     }
 
     const ground_mat = rc.Material{
@@ -132,7 +143,7 @@ pub fn main() !void {
             .inv_proj = camera.inv_proj,
         },
         .world = try core.World.init(gpa),
-        .world_dev = try gpu.DeviceWorld.init(NUM_SPHERES + 1, (36 + 60) * 4, (36 + 60), 2, 5),
+        .world_dev = try gpu.DeviceWorld.init(NUM_SPHERES + 1, (36 + 60) * 4, (36 + 60), 2, 6),
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();

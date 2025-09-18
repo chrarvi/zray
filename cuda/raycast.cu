@@ -35,7 +35,16 @@ typedef struct {
     Material material;
     float t;
     bool front_face;
+    float u, v;
 } HitRecord;
+
+typedef struct {
+    bool did_scatter;
+    Ray scattered_ray;
+    vec3 attenuation;
+    vec3 emission;
+} ScatterResult;
+
 
 typedef struct {
     TensorView<float, 2> pos;
@@ -70,29 +79,6 @@ __global__ void setup_rng(curandState* state, int width, int height, int seed) {
 
 __device__ vec3 ray_at(const Ray* ray, float t) {
     return ray->origin + t * ray->dir;
-}
-
-__device__ bool scatter_lambertian(const Ray* ray, const HitRecord* hit_record, curandState* local_state, vec3* attenuation, Ray* scattered) {
-    vec3 scatter_dir = hit_record->normal + random_unit_vector(local_state);
-    if (near_zero(scatter_dir)) {
-        scatter_dir = hit_record->normal;
-    }
-
-    scattered->dir = scatter_dir;
-    attenuation->x = attenuation->x * hit_record->material.albedo.x;
-    attenuation->y = attenuation->y * hit_record->material.albedo.y;
-    attenuation->z = attenuation->z * hit_record->material.albedo.z;
-    return true;
-}
-
-__device__ bool scatter_metal(const Ray* ray, const HitRecord* hit_record, curandState* local_state, vec3* attenuation, Ray* scattered) {
-    vec3 reflected = reflect(ray->dir, hit_record->normal);
-    reflected = normalize(reflected) + (hit_record->material.fuzz * random_unit_vector(local_state));
-    scattered->dir = reflected;
-    attenuation->x = attenuation->x * hit_record->material.albedo.x;
-    attenuation->y = attenuation->y * hit_record->material.albedo.y;
-    attenuation->z = attenuation->z * hit_record->material.albedo.z;
-    return dot(scattered->dir, hit_record->normal) > 0.0f;
 }
 
 __device__ bool sphere_hit(const Sphere *sphere, const Ray *ray, float ray_tmin,
@@ -238,6 +224,8 @@ __device__ bool mesh_hit(
                 hit_record->point      = point;
                 hit_record->normal     = n_shade;
                 hit_record->front_face = front_face;
+                hit_record->u = u;
+                hit_record->v = v;
 
                 hit_record->material.albedo = material->albedo;
                 hit_record->material.emit = material->emit;
@@ -279,6 +267,69 @@ __device__ vec3 sample_square(curandState *local_state) {
     return {x, y, z};
 }
 
+__device__ ScatterResult scatter_material(
+    const Material& mat,
+    const Ray& in_ray,
+    const HitRecord& hit,
+    curandState* rng)
+{
+    ScatterResult result;
+    result.did_scatter = false;
+    result.attenuation = vec3{1,1,1};
+    result.emission    = mat.emit;
+
+    switch (mat.kind) {
+        case MAT_LAMBERTIAN: {
+            vec3 scatter_dir = hit.normal + random_unit_vector(rng);
+            if (near_zero(scatter_dir)) scatter_dir = hit.normal;
+
+            result.scattered_ray = Ray{
+                hit.point + 1e-4f * hit.normal,
+                scatter_dir
+            };
+            result.attenuation = mat.albedo;
+            result.did_scatter = true;
+            break;
+        }
+
+        case MAT_METAL: {
+            vec3 reflected = reflect(in_ray.dir, hit.normal);
+            reflected = normalize(reflected) + mat.fuzz * random_unit_vector(rng);
+
+            result.scattered_ray = Ray{
+                hit.point + 1e-4f * hit.normal,
+                reflected
+            };
+            result.attenuation = mat.albedo;
+            result.did_scatter = (dot(result.scattered_ray.dir, hit.normal) > 0.0f);
+            break;
+        }
+
+        case MAT_EMISSIVE: {
+            result.did_scatter = false;
+            break;
+        }
+
+        case MAT_WIREFRAME: {
+            float u = hit.u;
+            float v = hit.v;
+            float w = 1.0f - u - v;
+            const float edge_thickness = 0.02f;
+
+            bool is_edge = (u < edge_thickness ||
+                            v < edge_thickness ||
+                            w < edge_thickness);
+
+            result.did_scatter = false;
+            result.attenuation = is_edge ? vec3{0,0,0} : mat.albedo;
+            break;
+        }
+    }
+
+    return result;
+}
+
+
 __device__ vec3 ray_color(
     const Ray& ray,
     int max_depth,
@@ -286,8 +337,8 @@ __device__ vec3 ray_color(
     curandState* local_state)
 {
     Ray current_ray = ray;
-    vec3 attenuation = {1.0f, 1.0f, 1.0f};
-    vec3 color = {0.0f, 0.0f, 0.0f};
+    vec3 throughput = {1.0f, 1.0f, 1.0f};
+    vec3 accum = {0.0f, 0.0f, 0.0f};
 
     for (int depth = 0; depth < max_depth; ++depth) {
         HitRecord best_hit;
@@ -308,36 +359,26 @@ __device__ vec3 ray_color(
         }
 
         if (hit_anything) {
-            bool scattered = false;
-            Ray temp_ray = {current_ray.origin, current_ray.dir};
+            ScatterResult sr = scatter_material(best_hit.material, current_ray, best_hit, local_state);
 
-            switch (best_hit.material.kind) {
-                case MAT_LAMBERTIAN:
-                    scattered = scatter_lambertian(&current_ray, &best_hit, local_state, &attenuation, &temp_ray);
-                    break;
-                case MAT_METAL:
-                    scattered = scatter_metal(&current_ray, &best_hit, local_state, &attenuation, &temp_ray);
-                    break;
-                case MAT_EMISSIVE:
-                    return color + attenuation * best_hit.material.emit;
-            }
-
-            if (scattered) {
-                current_ray.origin = best_hit.point + 1e-4f * best_hit.normal;
-                current_ray.dir    = temp_ray.dir;
-            } else {
-                color = {0.0f, 0.0f, 0.0f};
+            accum = accum + throughput * sr.emission;
+            if (!sr.did_scatter) {
+                accum = accum + throughput *sr.attenuation;
                 break;
             }
+
+            throughput = throughput * sr.attenuation;
+            current_ray = sr.scattered_ray;
         } else {
-            // Miss: sky
-            const vec3 unit_dir = normalize(current_ray.dir);
+            // miss → sky
+            vec3 unit_dir = normalize(current_ray.dir);
             float t = 0.5f * (unit_dir.y + 1.0f);
-            color = color + ((1.0f - t) * vec3{1.0f, 1.0f, 1.0f} + t * vec3{0.5f, 0.7f, 1.0f}) * attenuation;
+            vec3 sky = (1.0f - t) * vec3{1.0f, 1.0f, 1.0f} + t * vec3{0.5f, 0.7f, 1.0f};
+            accum = accum + throughput * sky;
             break;
         }
     }
-    return color;
+    return accum;
 }
 
 __global__ void render_kernel(

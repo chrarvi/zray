@@ -8,8 +8,9 @@ pub const Mesh = rc.Mesh;
 
 pub const MaterialKind = struct {
     pub const Lambertian = rc.MAT_LAMBERTIAN;
-    pub const Metal      = rc.MAT_METAL;
-    pub const Emissive   = rc.MAT_EMISSIVE;
+    pub const Metal = rc.MAT_METAL;
+    pub const Emissive = rc.MAT_EMISSIVE;
+    pub const Wireframe = rc.MAT_WIREFRAME;
 };
 
 pub const rng_init = rc.rng_init;
