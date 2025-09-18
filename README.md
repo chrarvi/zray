@@ -1,6 +1,6 @@
 # Zig + CUDA Raytracer
 
-Implementing a raytracer in CUDA using the C CUDA Runtime API and glueing it together with Zig's great C interop.
+Implementing a path tracer in CUDA using the C CUDA Runtime API and glueing it together with Zig's great C interop.
 
 Requirements:
 - Raylib 5.0 in `external/raylib-5.5_linux_amd64/`

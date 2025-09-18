@@ -38,14 +38,15 @@ pub fn init_default(screen_width: usize, screen_height: usize) Camera {
     const width: f32 = @as(f32, @floatFromInt(screen_width));
     const height: f32 = @as(f32, @floatFromInt(screen_height));
     const aspect = width / height;
+    const fov = al.deg2Rad(140.0);
     const camera = Camera{
         .z_near = 0.1,
         .z_far = 500.0,
-        .fov = 90.0,
+        .fov = fov,
         .mouse_position = al.Vec3.new(width / 2, height / 2, 0),
         .aspect = aspect,
-        .proj = al.mat4_projection_perspective(90.0, aspect, 0.1, 500.0),
-        .inv_proj = al.mat4_projection_perspective_inverse(90.0, aspect, 0.1, 500.0),
+        .proj = al.mat4_projection_perspective(fov, aspect, 0.1, 500.0),
+        .inv_proj = al.mat4_projection_perspective_inverse(fov, aspect, 0.1, 500.0),
     };
 
     return camera;

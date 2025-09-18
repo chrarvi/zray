@@ -140,3 +140,9 @@ pub fn mat4_translate(M: *Mat4, t: Vec3) *Mat4 {
     M[2][3] += t.z;
     return M;
 }
+
+pub fn mat4_scale(M: *Mat4, s: Vec3) void {
+    M[0][0] *= s.x;
+    M[1][1] *= s.y;
+    M[2][2] *= s.z;
+}

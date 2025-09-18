@@ -15,10 +15,75 @@ const RNG_SEED: i32 = 1234;
 const AtomicUsize = std.atomic.Value(usize);
 const AtomicBool = std.atomic.Value(bool);
 
-const SIMULATION_FRAMERATE: f32 = 30.0;
+const SIMULATION_FRAMERATE: f32 = 10.0;
 const RENDERING_FRAMERATE: f32 = 30.0;
 
 const NUM_SPHERES = 4;
+
+pub fn setup_box_scene(
+    world: *core.World,
+    scene_scale: al.Vec3, // now a vector
+) !void {
+    const mat_red = rc.Material{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.8, .y = 0.0, .z = 0.0 },
+    };
+    const mat_gray = rc.Material{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.5, .y = 0.5, .z = 0.5 },
+    };
+    const mat_green = rc.Material{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.0, .y = 0.8, .z = 0.5 },
+    };
+    const mat_light = rc.Material{
+        .kind = rc.MaterialKind.Emissive,
+        .emit = .{ .x = 0.95 * 1.0, .y = 0.9 * 1.0, .z = 0.7 * 1.0 }, // yellowish
+    };
+
+    try world.materials.append(mat_red);
+    const red = 0;
+    try world.materials.append(mat_gray);
+    const gray = 1;
+    try world.materials.append(mat_green);
+    const green = 2;
+    try world.materials.append(mat_light);
+    const light = 3;
+
+    const base_cube = "assets/meshes/cube.txt";
+    const base_ico = "assets/meshes/icosahedron.txt";
+
+    const s = scene_scale; // shorthand
+
+    const instances = [_]struct {
+        name: []const u8,
+        scale: al.Vec3,
+        translate: al.Vec3,
+        mat: c_uint,
+    }{
+        // walls
+        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(-s.x, 0.0, 0.0), .mat = red },
+        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(s.x, 0.0, 0.0), .mat = green },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, -s.y, 0.0), .mat = gray },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, s.y, 0.0), .mat = gray },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, -s.z), .mat = gray },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, s.z), .mat = gray },
+
+        // light
+        .{ .name = base_cube, .scale = al.Vec3.new(0.2 * s.x, 0.1 * s.y, 0.2 * s.z), .translate = al.Vec3.new(0.0, 0.9 * s.y, 0.0), .mat = light },
+
+        // props
+        .{ .name = base_cube, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.25 * s.x, -0.5 * s.y, 0.0), .mat = gray },
+        .{ .name = base_ico, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(-0.25 * s.x, -0.5 * s.y, 0.0), .mat = gray },
+    };
+
+    for (instances) |desc| {
+        var mesh = try world.mesh_atlas.parse_mesh_from_file(desc.name);
+        _ = al.mat4_scale(&mesh.model, desc.scale);
+        _ = al.mat4_translate(&mesh.model, desc.translate);
+        mesh.material_idx = desc.mat;
+    }
+}
 
 pub fn fill_world(world: *core.World) !void {
     const world_width = 50.0;
@@ -101,7 +166,7 @@ pub fn main() !void {
     var gpa = std.heap.page_allocator;
 
     const aspect_ratio = 16.0 / 9.0;
-    const image_width: u32 = 1080;
+    const image_width: u32 = 400;
     const image_height: u32 = @intFromFloat(@max(@divFloor(@as(f32, @floatFromInt(image_width)), aspect_ratio), 1));
 
     // double-buffering
@@ -142,12 +207,12 @@ pub fn main() !void {
             .inv_proj = camera.inv_proj,
         },
         .world = try core.World.init(gpa),
-        .world_dev = try gpu.DeviceWorld.init(NUM_SPHERES + 1, (36 + 60) * 4, (36 + 60), 2, 6),
+        .world_dev = try gpu.DeviceWorld.init(1, (36 * 8 + 60) * 4, (36 * 8 + 60), 9, 4),
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
 
-    try fill_world(&shared.world);
+    try setup_box_scene(&shared.world, al.Vec3.new(5.0, 3.0, 5.0));
     rc.rng_init(shared.cam.image_height, shared.cam.image_width, RNG_SEED);
     defer rc.rng_deinit();
 
