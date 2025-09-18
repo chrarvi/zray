@@ -8,7 +8,7 @@ aspect: f32,
 z_near: f32,
 z_far: f32,
 
-pos: al.Vec3 = al.Vec3.new(0, 0, 10),
+pos: al.Vec3 = al.Vec3.new(0, -1.0, 6.0),
 front: al.Vec3 = al.Vec3.new(0, 0, -1),
 up: al.Vec3 = al.Vec3.new(0, 1, 0),
 right: al.Vec3 = al.Vec3.new(1, 0, 0),

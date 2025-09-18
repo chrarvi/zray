@@ -18,6 +18,7 @@ pub const rng_init = rc.rng_init;
 pub const rng_deinit = rc.rng_deinit;
 
 pub extern fn launch_raycast(
+    d_img_accum: cu.TensorView(f32, 3),
     d_img: cu.TensorView(u8, 3),
     cam: *rc.CameraData,
     d_spheres: cu.TensorView(rc.Sphere, 1),
@@ -27,4 +28,6 @@ pub extern fn launch_raycast(
     d_indices: cu.TensorView(u32, 1),
     d_meshes: cu.TensorView(rc.Mesh, 1),
     d_materials: cu.TensorView(rc.Material, 1),
+    frame_idx: u32,
+    temporal_averaging: bool,
 ) void;

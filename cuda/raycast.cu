@@ -3,6 +3,7 @@
 #include "raycast.h"
 #include <cmath>
 #include <cuda_runtime.h>
+#include <ios>
 #include <math.h>
 #include "math.cuh"
 #include "tensor_view.cuh"
@@ -168,6 +169,8 @@ __device__ bool mesh_hit(
 
     for (size_t m = 0; m < meshes.shape[0]; ++m) {
         Mesh* mesh = &meshes.at(m);
+        // todo: skip mesh if ray does not intersect the mesh bounding box at all
+
         uint32_t start = mesh->index_start;
         uint32_t end   = start + mesh->index_count;
 
@@ -402,11 +405,12 @@ __device__ vec3 ray_color(
     return accum;
 }
 
-__global__ void render_kernel(
-    TensorView<char, 3> d_img,
-    const CameraData* cam,
-    Scene scene,
-    curandState* rng_state)
+__global__ void render_kernel(TensorView<float, 3> d_img_accum,
+                              TensorView<char, 3> d_img, const CameraData *cam,
+                              Scene scene, curandState *rng_state,
+                              unsigned int frame_idx,
+                              bool temporal_averaging
+                              )
 {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -441,12 +445,30 @@ __global__ void render_kernel(
         color = color + ray_color(ray, cam->max_depth, &scene, local_state);
     }
 
-    color = color / (float)cam->samples_per_pixel;
-    color = color_linear_to_gamma(color);
 
-    d_img.at(y, x, 0) = (unsigned char)(255.0f * clamp(color.x, 0.0f, 0.999f));
-    d_img.at(y, x, 1) = (unsigned char)(255.0f * clamp(color.y, 0.0f, 0.999f));
-    d_img.at(y, x, 2) = (unsigned char)(255.0f * clamp(color.z, 0.0f, 0.999f));
+    color = color / (float)cam->samples_per_pixel;
+
+    // --- Temporal accumulation ---
+    vec3 prev = vec3{
+        d_img_accum.at(y, x, 0),
+        d_img_accum.at(y, x, 1),
+        d_img_accum.at(y, x, 2)
+    };
+    vec3 new_avg;
+    if (temporal_averaging) {
+        new_avg = (prev * frame_idx + color) / (frame_idx + 1);
+        d_img_accum.at(y, x, 0) = new_avg.x;
+        d_img_accum.at(y, x, 1) = new_avg.y;
+        d_img_accum.at(y, x, 2) = new_avg.z;
+    } else {
+        new_avg = color;
+    }
+
+    // gamma corrected output
+    vec3 display_color = clamp(color_linear_to_gamma(new_avg), 0.0, 0.999);
+    d_img.at(y, x, 0) = (unsigned char)(255.0f * display_color.x);
+    d_img.at(y, x, 1) = (unsigned char)(255.0f * display_color.y);
+    d_img.at(y, x, 2) = (unsigned char)(255.0f * display_color.z);
 }
 
 curandState *d_rng_state;
@@ -464,15 +486,15 @@ EXTERN_C void rng_init(size_t image_height, size_t image_width, int seed) {
     CHECK_CUDA(cudaDeviceSynchronize());
 }
 
-EXTERN_C void launch_raycast(TensorView<char, 3> d_img,
+EXTERN_C void launch_raycast(TensorView<float, 3> d_img_accum,
+                             TensorView<char, 3> d_img,
                              const CameraData *cam,
-                             TensorView<Sphere, 1> d_spheres,
-                             TensorView<float, 2> d_vb_pos,
-                             TensorView<float, 2> d_vb_color,
-                             TensorView<float, 2> d_vb_norm,
-                             TensorView<uint32_t, 1> d_indices,
-                             TensorView<Mesh, 1> d_meshes,
-                             TensorView<Material, 1> d_materials) {
+                             TensorView<Sphere, 1> d_spheres, TensorView<float, 2> d_vb_pos,
+                             TensorView<float, 2> d_vb_color, TensorView<float, 2> d_vb_norm,
+                             TensorView<uint32_t, 1> d_indices, TensorView<Mesh, 1> d_meshes,
+                             TensorView<Material, 1> d_materials,
+                             unsigned int frame_idx,
+                             bool temporal_averaging) {
     // d_img: height, width 3
     // d_spheres: n_spheres
     // d_vb_pos: n_vertex, 3
@@ -497,7 +519,7 @@ EXTERN_C void launch_raycast(TensorView<char, 3> d_img,
     dim3 grid((cam->image_width + block.x - 1) / block.x,
                 (cam->image_height + block.y - 1) / block.y);
 
-    render_kernel<<<grid, block>>>(d_img, cam, scene, d_rng_state);
+    render_kernel<<<grid, block>>>(d_img_accum, d_img, cam, scene, d_rng_state, frame_idx, temporal_averaging);
     CHECK_CUDA(cudaPeekAtLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 }

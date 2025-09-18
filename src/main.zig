@@ -38,7 +38,7 @@ pub fn setup_box_scene(
     };
     const mat_light = rc.Material{
         .kind = rc.MaterialKind.Emissive,
-        .emit = .{ .x = 0.95 * 1.0, .y = 0.9 * 1.0, .z = 0.7 * 1.0 }, // yellowish
+        .emit = .{ .x = 0.95 * 10.0, .y = 0.9 * 10.0, .z = 0.7 * 10.0 }, // yellowish
     };
 
     try world.materials.append(mat_red);
@@ -73,8 +73,8 @@ pub fn setup_box_scene(
         .{ .name = base_cube, .scale = al.Vec3.new(0.2 * s.x, 0.1 * s.y, 0.2 * s.z), .translate = al.Vec3.new(0.0, 0.9 * s.y, 0.0), .mat = light },
 
         // props
-        .{ .name = base_cube, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.25 * s.x, -0.5 * s.y, 0.0), .mat = gray },
-        .{ .name = base_ico, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(-0.25 * s.x, -0.5 * s.y, 0.0), .mat = gray },
+        .{ .name = base_cube, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.3 * s.x, -0.7 * s.y, 0.0), .mat = gray },
+        .{ .name = base_ico, .scale = al.Vec3.full(1.0), .translate = al.Vec3.new(-0.3 * s.x, -0.6 * s.y, 0.0), .mat = gray },
     };
 
     for (instances) |desc| {
@@ -166,7 +166,7 @@ pub fn main() !void {
     var gpa = std.heap.page_allocator;
 
     const aspect_ratio = 16.0 / 9.0;
-    const image_width: u32 = 400;
+    const image_width: u32 = 1080;
     const image_height: u32 = @intFromFloat(@max(@divFloor(@as(f32, @floatFromInt(image_width)), aspect_ratio), 1));
 
     // double-buffering
@@ -195,14 +195,16 @@ pub fn main() !void {
     var shared = sim.SimSharedState{
         .frame_buffers_host = .{ img_host0, img_host1 },
         .frame_buffer_dev = try cu.CudaBuffer(u8).init(buf_size),
+        .frame_buffer_dev_accum = try cu.CudaBuffer(f32).init(buf_size),
         .ready_idx = AtomicUsize.init(0),
         .running = AtomicBool.init(true),
         .cam = rc.CameraData{
             .image_width = image_width,
             .image_height = image_height,
             .focal_length = 1.0,
-            .samples_per_pixel = 16,
-            .max_depth = 8,
+            .samples_per_pixel = 8,
+            .temporal_averaging = true,
+            .max_depth = 4,
             .camera_to_world = camera.camera_to_world(),
             .inv_proj = camera.inv_proj,
         },
@@ -211,8 +213,9 @@ pub fn main() !void {
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
+    defer shared.frame_buffer_dev_accum.deinit();
 
-    try setup_box_scene(&shared.world, al.Vec3.new(5.0, 3.0, 5.0));
+    try setup_box_scene(&shared.world, al.Vec3.new(4.0, 3.0, 10.0));
     rc.rng_init(shared.cam.image_height, shared.cam.image_width, RNG_SEED);
     defer rc.rng_deinit();
 

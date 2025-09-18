@@ -72,15 +72,19 @@ inline __device__ vec3 cross(vec3 a, vec3 b) {
 }
 
 inline __device__ vec3 fminf(vec3 v, float c) {
-  return {
-      fminf(v.x, c),
-      fminf(v.y, c),
-      fminf(v.z, c),
-  };
+    return {
+        fminf(v.x, c),
+        fminf(v.y, c),
+        fminf(v.z, c),
+    };
 }
 
-inline  __device__ float clamp(float v, float mn, float mx) {
-    return fmaxf(fminf(v, mx), mn);
+inline  __device__ vec3 clamp(vec3 v, float mn, float mx) {
+    return {
+        fmaxf(fminf(v.x, mx), mn),
+        fmaxf(fminf(v.y, mx), mn),
+        fmaxf(fminf(v.z, mx), mn),
+    };
 }
 
 inline  __device__ bool near_zero(vec3 v) {
@@ -154,6 +158,10 @@ inline __device__ vec4 rmmul(const vec4 v, const float M[4][4]) {
     r.z = M[0][2] * v.x + M[1][2] * v.y + M[2][2] * v.z + M[3][2] * v.w;
     r.w = M[0][3] * v.x + M[1][3] * v.y + M[2][3] * v.z + M[3][3] * v.w;
     return r;
+}
+
+inline __device__ vec3 lerp(const vec3 &a, const vec3 &b, float t) {
+    return t * a + (1 - t) * b;
 }
 
 inline __device__ vec3 bary_lerp(const vec3& a, const vec3& b, const vec3& c, float u, float v) {

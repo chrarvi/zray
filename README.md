@@ -10,11 +10,15 @@ Requirements:
 ## Current progress:
 Spheres:
 
-![alt text](https://github.com/chrarvi/zray/blob/main/assets/render.png?raw=true)
+![spheres render](https://github.com/chrarvi/zray/blob/main/assets/render.png?raw=true)
 
 Teapot: (No BVH yet so super inefficient with the number of tris)
 
-![alt text](https://github.com/chrarvi/zray/blob/main/assets/teapot.png?raw=true)
+![teapot render](https://github.com/chrarvi/zray/blob/main/assets/teapot.png?raw=true)
+
+Cornell:
+
+![cornell render](https://github.com/chrarvi/zray/blob/main/assets/cornell.png?raw=true)
 
 **References**:
 - https://raytracing.github.io/books/RayTracingInOneWeekend.html

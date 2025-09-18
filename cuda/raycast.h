@@ -4,6 +4,7 @@
 #define RAYCAST_H_
 
 #include <stdlib.h>
+#include <stdbool.h>
 
 #if defined(__cplusplus)
     #define EXTERN_C extern "C"
@@ -31,9 +32,9 @@ typedef struct {
     float focal_length;
     unsigned int samples_per_pixel;
     int max_depth;
-
     mat4 camera_to_world;
     mat4 inv_proj;
+    bool temporal_averaging;
 } CameraData;
 
 typedef enum {

@@ -9,6 +9,7 @@ const AtomicBool = std.atomic.Value(bool);
 pub const SimSharedState = struct {
     frame_buffers_host: [2][]u8, // double-buffering
     frame_buffer_dev: gpu.cuda.CudaBuffer(u8),
+    frame_buffer_dev_accum: gpu.cuda.CudaBuffer(f32),
     ready_idx: AtomicUsize, // which buffer is ready for display
     running: AtomicBool, // shutdown flag
     cam: rc.CameraData,
@@ -47,7 +48,7 @@ pub const Simulator = struct {
 };
 
 fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
-    var frame: f32 = 0.0;
+    var frame_idx: u32 = 0;
     const sim_dt = 1.0 / frame_rate;
     var last = try std.time.Instant.now();
 
@@ -66,6 +67,7 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
 
         const wd = &shared.world_dev;
         rc.launch_raycast(
+            try shared.frame_buffer_dev_accum.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }),
             try shared.frame_buffer_dev.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }),
             &shared.cam,
             try wd.spheres.view(1, .{wd.spheres.len}),
@@ -75,11 +77,12 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
             try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
             try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
             try wd.materials.view(1, .{shared.world.materials.items.len}),
+            frame_idx,
+            shared.cam.temporal_averaging,
         );
         try shared.frame_buffer_dev.toHost(shared.frame_buffers_host[write_idx]);
 
         shared.ready_idx.store(write_idx, .release);
-
-        frame += 1.0;
+        frame_idx += 1;
     }
 }
