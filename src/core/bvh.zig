@@ -20,8 +20,8 @@ pub const BoundingVolumeHierarchy = struct {
             const fmin = std.math.floatMin(f32);
             const fmax = std.math.floatMax(f32);
             return AABB{
-                .min = .{ fmax, fmax, fmax },
-                .max = .{ fmin, fmin, fmin },
+                .min = al.Vec3.full(fmax),
+                .max = al.Vec3.full(fmin),
             };
         }
     };
@@ -82,13 +82,13 @@ pub const BoundingVolumeHierarchy = struct {
         for (0..node.prims_count) |pi| {
             const leaf_tri_idx = self.prim_indices[node.prims_offset + pi];
             const leaf_tri = &atlas.get_triangle(TEST_MESH_IDX, leaf_tri_idx).?;
-            node.box.min = al.vec3_min(node.box.min, leaf_tri.pos[0]);
-            node.box.min = al.vec3_min(node.box.min, leaf_tri.pos[1]);
-            node.box.min = al.vec3_min(node.box.min, leaf_tri.pos[2]);
+            node.box.min = node.box.min.min(leaf_tri.pos[0]);
+            node.box.min = node.box.min.min(leaf_tri.pos[1]);
+            node.box.min = node.box.min.min(leaf_tri.pos[2]);
 
-            node.box.max = al.vec3_max(node.box.max, leaf_tri.pos[0]);
-            node.box.max = al.vec3_max(node.box.max, leaf_tri.pos[1]);
-            node.box.max = al.vec3_max(node.box.max, leaf_tri.pos[2]);
+            node.box.max = node.box.max.max(leaf_tri.pos[0]);
+            node.box.max = node.box.max.max(leaf_tri.pos[1]);
+            node.box.max = node.box.max.max(leaf_tri.pos[2]);
         }
     }
 
@@ -99,19 +99,19 @@ pub const BoundingVolumeHierarchy = struct {
             return;
         }
 
-        const extent = al.sub(node.box.max, node.box.min);
+        const extent = node.box.max.sub(node.box.min);
         var axis: usize = 0;
-        if (extent[1] > extent[0]) axis = 1;
-        if (extent[2] > extent[axis]) axis = 2;
-        const split_pos = node.box.min[axis] + extent[axis] * 0.5;
+        if (extent.y > extent.x) axis = 1;
+        if (extent.z > extent.get(axis)) axis = 2;
+        const split_pos = node.box.min.get(axis) + extent.get(axis) * 0.5;
 
         // partition into two groups (quicksort ish)
         var i = node.prims_offset;
         var j = i + node.prims_count - 1;
         while (i <= j) {
             const tri = atlas.get_triangle(TEST_MESH_IDX, self.prim_indices[i]).?;
-            const centroid = al.scale(al.add(al.add(tri.pos[0], tri.pos[1]), tri.pos[2]), 1.0 / 3.0);
-            if (centroid[axis] < split_pos) {
+            const centroid = tri.pos[0].add(tri.pos[1]).add(tri.pos[2]).scale(1.0 / 3.0);
+            if (centroid.get(axis) < split_pos) {
                 i += 1;
             } else {
                 const tmp = self.prim_indices[i];
@@ -146,6 +146,5 @@ pub const BoundingVolumeHierarchy = struct {
 
     pub fn print(self: *const Self) void {
         std.debug.print("BVH: {?}", self);
-
     }
 };

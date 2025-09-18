@@ -54,23 +54,23 @@ pub const MeshAtlas = struct {
                 const pos_line = lines_iter.next().?;
                 var pos_iter = std.mem.splitScalar(u8, pos_line, ' ');
 
-                const vert: al.Vec4 = .{
+                const vert = al.Vec4.new(
                     try std.fmt.parseFloat(f32, pos_iter.next().?),
                     try std.fmt.parseFloat(f32, pos_iter.next().?),
                     try std.fmt.parseFloat(f32, pos_iter.next().?),
                     1.0,
-                };
+                );
                 const norm_line = lines_iter.next().?;
                 var norm_iter = std.mem.splitScalar(u8, norm_line, ' ');
 
-                const normal: al.Vec4 = .{
+                const normal = al.Vec4.new(
                     try std.fmt.parseFloat(f32, norm_iter.next().?),
                     try std.fmt.parseFloat(f32, norm_iter.next().?),
                     try std.fmt.parseFloat(f32, norm_iter.next().?),
                     0.0,
-                };
+                );
 
-                const col: al.Vec4 = .{ 1.0, 1.0, 1.0, 1.0 };
+                const col = al.Vec4.new( 1.0, 1.0, 1.0, 1.0 );
 
                 try self.vb.push_vertex(vert, col, normal);
                 try self.indices.append(@as(u32, @intCast(vertex_start + t_idx * 3 + v_idx)));
@@ -107,9 +107,9 @@ pub const MeshAtlas = struct {
         const idx_3 = self.indices.items[start + base + 2];
         return .{
             .pos = .{
-                al.vec4_to_vec3(self.vb.pos_buf.items[idx_1]),
-                al.vec4_to_vec3(self.vb.pos_buf.items[idx_2]),
-                al.vec4_to_vec3(self.vb.pos_buf.items[idx_3]),
+                self.vb.pos_buf.items[idx_1].xyz(),
+                self.vb.pos_buf.items[idx_2].xyz(),
+                self.vb.pos_buf.items[idx_3].xyz(),
             },
             .color = .{
                 self.vb.color_buf.items[idx_1],
@@ -117,9 +117,9 @@ pub const MeshAtlas = struct {
                 self.vb.color_buf.items[idx_3],
             },
             .normal = .{
-                al.vec4_to_vec3(self.vb.normal_buf.items[idx_1]),
-                al.vec4_to_vec3(self.vb.normal_buf.items[idx_2]),
-                al.vec4_to_vec3(self.vb.normal_buf.items[idx_3]),
+                self.vb.normal_buf.items[idx_1].xyz(),
+                self.vb.normal_buf.items[idx_2].xyz(),
+                self.vb.normal_buf.items[idx_3].xyz(),
             },
         };
     }

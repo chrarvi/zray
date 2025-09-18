@@ -1,61 +1,88 @@
-pub const Vec3 = [3]f32;
-pub const Vec4 = [4]f32;
 pub const Mat4 = [4][4]f32;
 
+pub const Vec4 = extern struct {
+    x: f32, y: f32, z: f32, w: f32,
+
+    pub fn new(x: f32, y: f32, z: f32, w: f32) Vec4 {
+        return Vec4{ .x = x, .y = y, .z = z, .w = w };
+    }
+
+    pub fn xyz(s: Vec4) Vec3 {
+        return Vec3.new(s.x, s.y, s.z);
+    }
+};
+
+pub const Vec3 = extern struct {
+    x: f32,
+    y: f32,
+    z: f32,
+
+    pub fn new(x: f32, y: f32, z: f32) Vec3 {
+        return Vec3{ .x = x, .y = y, .z = z };
+    }
+    pub fn full(v: f32) Vec3 {
+        return Vec3.new(v, v, v);
+    }
+    pub fn get(self: *const Vec3, idx: usize) f32 {
+        return switch (idx) {
+            0 => self.x,
+            1 => self.y,
+            2 => self.z,
+            else => unreachable,
+        };
+    }
+    pub fn dot(s: Vec3, o: Vec3) f32 {
+        return s.x * o.x + s.y * o.y + s.z * o.z;
+    }
+    pub fn cross(a: Vec3, b: Vec3) Vec3 {
+        return Vec3.new(
+            a.y * b.z - a.z * b.y,
+            a.z * b.x - a.x * b.z,
+            a.x * b.y - a.y * b.x,
+        );
+    }
+    pub fn length(self: Vec3) f32 {
+        return @sqrt(self.dot(self));
+    }
+    pub fn normalize(self: *Vec3) void {
+        const rlen = 1.0 / self.length();
+        self.x *= rlen;
+        self.y *= rlen;
+        self.z *= rlen;
+    }
+
+    pub fn scale(s: Vec3, c: f32) Vec3 {
+        return Vec3.new(s.x * c, s.y * c, s.z * c);
+    }
+
+    pub fn sub(s: Vec3, o: Vec3) Vec3 {
+        return Vec3.new(s.x - o.x, s.y - o.y, s.z - o.z);
+    }
+
+    pub fn add(s: Vec3, o: Vec3) Vec3 {
+        return Vec3.new(s.x + o.x, s.y + o.y, s.z + o.z);
+    }
+    pub fn min(s: Vec3, o: Vec3) Vec3 {
+        return Vec3.new(
+            @min(s.x, o.x),
+            @min(s.y, o.y),
+            @min(s.z, o.z),
+        );
+    }
+    pub fn max(s: Vec3, o: Vec3) Vec3 {
+        return Vec3.new(
+            @max(s.x, o.x),
+            @max(s.y, o.y),
+            @max(s.z, o.z),
+        );
+    }
+
+    pub fn to_vec4(s: Vec3, w: f32) Vec4 {
+        return Vec4.new(s.x, s.y, s.z, w);
+    }
+};
+
 pub const PI: f32 = 3.14159265358979323846264338327950288;
-
-pub fn cross(a: Vec3, b: Vec3) Vec3 {
-    return .{
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    };
-}
-
-pub fn dot(a: Vec3, b: Vec3) f32 {
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
-pub fn length(v: Vec3) f32 {
-    return @sqrt(dot(v, v));
-}
-
-pub fn normalize(v: Vec3) Vec3 {
-    const rlen = 1.0 / length(v);
-    return .{ v[0] * rlen, v[1] * rlen, v[2] * rlen };
-}
-
-pub fn scale(v: Vec3, c: f32) Vec3 {
-    return .{ v[0] * c, v[1] * c, v[2] * c };
-}
-
-pub fn sub(a: Vec3, b: Vec3) Vec3 {
-    return .{ a[0] - b[0], a[1] - b[1], a[2] - b[2] };
-}
-
-pub fn add(a: Vec3, b: Vec3) Vec3 {
-    return .{ a[0] + b[0], a[1] + b[1], a[2] + b[2] };
-}
-
-pub fn vec3_min(a: Vec3, b: Vec3) Vec3 {
-    return .{
-        @min(a[0], b[0]),
-        @min(a[1], b[1]),
-        @min(a[2], b[2]),
-    };
-}
-
-pub fn vec3_max(a: Vec3, b: Vec3) Vec3 {
-    return .{
-        @max(a[0], b[0]),
-        @max(a[1], b[1]),
-        @max(a[2], b[2]),
-    };
-}
-
-pub fn vec4_to_vec3(v: Vec4) Vec3 {
-    return Vec3{v[0], v[1], v[2]};
-}
 
 pub fn deg2Rad(degrees: f32) f32 {
     return (degrees / 360.0) * 2 * PI;
@@ -108,8 +135,8 @@ pub fn mat4_projection_perspective_inverse(fovy: f32, aspect: f32, z_near: f32, 
 }
 
 pub fn mat4_translate(M: *Mat4, t: Vec3) *Mat4 {
-    M[0][3] += t[0];
-    M[1][3] += t[1];
-    M[2][3] += t[2];
+    M[0][3] += t.x;
+    M[1][3] += t.y;
+    M[2][3] += t.z;
     return M;
 }
