@@ -158,6 +158,8 @@ pub fn main() !void {
     try shared.world_dev.meshes.fromHost(shared.world.mesh_atlas.meshes.items);
     try shared.world_dev.materials.fromHost(shared.world.materials.items);
 
+    var bvh = core.BoundingVolumeHierarchy.init();
+    bvh.build(&shared.world.mesh_atlas);
     var simulator = sim.Simulator.init(SIMULATION_FRAMERATE, &shared);
     try simulator.start();
 

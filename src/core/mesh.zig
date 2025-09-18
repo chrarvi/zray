@@ -3,6 +3,12 @@ const core = @import("core.zig");
 const al = @import("linalg.zig");
 const rc = @import("../gpu/raycast.zig");
 
+const Triangle = struct {
+    pos: [3]al.Vec3,
+    color: [3]al.Vec4,
+    normal: [3]al.Vec3,
+};
+
 pub const MeshAtlas = struct {
     vb: core.HostVertexBuffer,
     indices: std.ArrayList(u32),
@@ -81,6 +87,44 @@ pub const MeshAtlas = struct {
 
         try self.meshes.append(mesh);
         return &self.meshes.items[self.meshes.items.len - 1];
+    }
 
+    pub fn get_triangle(self: *const MeshAtlas, mesh_idx: usize, tri_index: usize) ?Triangle {
+        if (mesh_idx >= self.meshes.items.len) {
+            return null;
+        }
+        const mesh = &self.meshes.items[mesh_idx];
+        const start = @as(usize, @intCast(mesh.index_start));
+        const count = @as(usize, @intCast(mesh.index_count));
+
+        const base = tri_index * 3;
+        if (base + 2 >= count) {
+            return null;
+        }
+
+        const idx_1 = self.indices.items[start + base];
+        const idx_2 = self.indices.items[start + base + 1];
+        const idx_3 = self.indices.items[start + base + 2];
+        return .{
+            .pos = .{
+                al.vec4_to_vec3(self.vb.pos_buf.items[idx_1]),
+                al.vec4_to_vec3(self.vb.pos_buf.items[idx_2]),
+                al.vec4_to_vec3(self.vb.pos_buf.items[idx_3]),
+            },
+            .color = .{
+                self.vb.color_buf.items[idx_1],
+                self.vb.color_buf.items[idx_2],
+                self.vb.color_buf.items[idx_3],
+            },
+            .normal = .{
+                al.vec4_to_vec3(self.vb.normal_buf.items[idx_1]),
+                al.vec4_to_vec3(self.vb.normal_buf.items[idx_2]),
+                al.vec4_to_vec3(self.vb.normal_buf.items[idx_3]),
+            },
+        };
+    }
+    pub fn num_triangles(self: *const MeshAtlas, mesh_idx: usize) usize {
+        std.debug.assert(mesh_idx < self.meshes.items.len);
+        return self.meshes.items[mesh_idx].index_count / 3;
     }
 };

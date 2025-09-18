@@ -37,6 +37,26 @@ pub fn add(a: Vec3, b: Vec3) Vec3 {
     return .{ a[0] + b[0], a[1] + b[1], a[2] + b[2] };
 }
 
+pub fn vec3_min(a: Vec3, b: Vec3) Vec3 {
+    return .{
+        @min(a[0], b[0]),
+        @min(a[1], b[1]),
+        @min(a[2], b[2]),
+    };
+}
+
+pub fn vec3_max(a: Vec3, b: Vec3) Vec3 {
+    return .{
+        @max(a[0], b[0]),
+        @max(a[1], b[1]),
+        @max(a[2], b[2]),
+    };
+}
+
+pub fn vec4_to_vec3(v: Vec4) Vec3 {
+    return Vec3{v[0], v[1], v[2]};
+}
+
 pub fn deg2Rad(degrees: f32) f32 {
     return (degrees / 360.0) * 2 * PI;
 }
