@@ -479,7 +479,7 @@ curandState *d_rng_state;
 EXTERN_C void rng_init(size_t image_height, size_t image_width, int seed) {
     CHECK_CUDA(cudaMalloc(&d_rng_state, image_height * image_width * sizeof(curandState)));
 
-    dim3 block(16, 16);
+    dim3 block(32, 8);
     dim3 grid((image_width + block.x - 1) / block.x,
                 (image_height + block.y - 1) / block.y);
 
@@ -519,7 +519,7 @@ EXTERN_C void launch_raycast(TensorView<float, 3> d_img_accum,
         .materials = d_materials,
     };
 
-    dim3 block(16, 16);
+    dim3 block(32, 8);
     dim3 grid((cam->image_width + block.x - 1) / block.x,
                 (cam->image_height + block.y - 1) / block.y);
 
