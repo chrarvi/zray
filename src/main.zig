@@ -24,48 +24,39 @@ pub fn setup_box_scene(
     world: *core.World,
     scene_scale: al.Vec3, // now a vector
 ) !void {
-    const mat_red = rc.Material{
+    const mat_red_id = try world.register_material(.{
         .kind = rc.MaterialKind.Lambertian,
         .albedo = .{ .x = 0.8, .y = 0.0, .z = 0.0 },
-    };
-    const mat_gray = rc.Material{
+    });
+    const mat_gray_id = try world.register_material(.{
         .kind = rc.MaterialKind.Lambertian,
         .albedo = .{ .x = 0.5, .y = 0.5, .z = 0.5 },
-    };
-    const mat_green = rc.Material{
+    });
+    const mat_green_id = try world.register_material(.{
         .kind = rc.MaterialKind.Lambertian,
         .albedo = .{ .x = 0.0, .y = 0.8, .z = 0.5 },
-    };
-    const mat_light = rc.Material{
+    });
+    const mat_light_id = try world.register_material(.{
         .kind = rc.MaterialKind.Emissive,
         .emit = .{ .x = 0.95 * 10.0, .y = 0.7 * 10.0, .z = 0.7 * 10.0 }, // yellowish
-    };
+    });
 
-    const mat_metal = rc.Material{
+    const mat_metal_id = try world.register_material(.{
         .kind = rc.MaterialKind.Metal,
         .albedo = .{ .x = 0.6, .y = 0.6, .z = 0.6 },
         .fuzz = 0.3,
-    };
+    });
 
-    const mat_glass_outer = rc.Material{
+    const mat_glass_outer_id = try world.register_material(.{
         .kind = rc.MaterialKind.Dialectric,
         .albedo = .{ .x = 1.0, .y = 0.0, .z = 0.0 },
         .refractive_index = 1.5,
-    };
-    const mat_glass_inner = rc.Material{
-        .kind = rc.MaterialKind.Dialectric,
-        .albedo = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
-        .refractive_index = 1.0,
-    };
-
-    const red = try world.register_material(mat_red);
-    const gray = try world.register_material(mat_gray);
-    const green = try world.register_material(mat_green);
-    const light = try world.register_material(mat_light);
-    const metal = try world.register_material(mat_metal);
-    const glass_outer = try world.register_material(mat_glass_outer);
-    const glass_inner = try world.register_material(mat_glass_inner);
-    _ = glass_inner;
+    });
+    // const mat_glass_inner_id = try world.register_material(.{
+    //     .kind = rc.MaterialKind.Dialectric,
+    //     .albedo = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
+    //     .refractive_index = 1.0,
+    // });
 
     const base_cube = "assets/meshes/cube.txt";
     const base_ico = "assets/meshes/icosahedron.txt";
@@ -79,19 +70,19 @@ pub fn setup_box_scene(
         mat: c_uint,
     }{
         // walls
-        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(-s.x, 0.0, 0.0), .mat = red },
-        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(s.x, 0.0, 0.0), .mat = green },
-        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, -s.y, 0.0), .mat = gray },
-        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, s.y, 0.0), .mat = gray },
-        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, -s.z), .mat = gray },
-        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, s.z), .mat = gray },
+        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(-s.x, 0.0, 0.0), .mat = mat_red_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(s.x, 0.0, 0.0), .mat = mat_green_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, -s.y, 0.0), .mat = mat_gray_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, s.y, 0.0), .mat = mat_gray_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, -s.z), .mat = mat_gray_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, s.z), .mat = mat_gray_id },
 
         // light
-        .{ .name = base_cube, .scale = al.Vec3.new(0.2 * s.x, 0.1 * s.y, 0.2 * s.z), .translate = al.Vec3.new(0.0, 0.9 * s.y, 0.0), .mat = light },
+        .{ .name = base_cube, .scale = al.Vec3.new(0.2 * s.x, 0.1 * s.y, 0.2 * s.z), .translate = al.Vec3.new(0.0, 0.9 * s.y, 0.0), .mat = mat_light_id },
 
         // props
-        .{ .name = base_cube, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.3 * s.x, -0.7 * s.y, -0.5 * s.z), .mat = metal },
-        .{ .name = base_ico, .scale = al.Vec3.full(1.0), .translate = al.Vec3.new(-0.3 * s.x, -0.6 * s.y, -0.2 * s.z), .mat = metal },
+        .{ .name = base_cube, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.3 * s.x, -0.7 * s.y, -0.5 * s.z), .mat = mat_metal_id },
+        .{ .name = base_ico, .scale = al.Vec3.full(1.0), .translate = al.Vec3.new(-0.3 * s.x, -0.6 * s.y, -0.2 * s.z), .mat = mat_metal_id },
     };
 
     for (instances) |desc| {
@@ -105,12 +96,12 @@ pub fn setup_box_scene(
     try world.spheres.append(.{
         .center = .{ .x = -0.0 * s.x, .y = -0.5 * s.y, .z = 0.2 * s.z },
         .radius = 0.5,
-        .material_idx = glass_outer,
+        .material_idx = mat_glass_outer_id,
     });
     try world.spheres.append(.{
         .center = .{ .x = -0.0 * s.x, .y = -0.5 * s.y, .z = 0.2 * s.z },
         .radius = 0.35,
-        .material_idx = green,
+        .material_idx = mat_green_id,
     });
 }
 
