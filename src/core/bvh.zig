@@ -55,7 +55,6 @@ pub const BoundingVolumeHierarchy = struct {
     pub fn build(self: *Self, atlas: *const core.MeshAtlas) void {
         const n_tris = atlas.num_triangles(TEST_MESH_IDX);
         for (0..n_tris) |ti| {
-            // compute centroid
             self.prim_indices[ti] = ti;
         }
         self.node_count = 1;
@@ -142,9 +141,5 @@ pub const BoundingVolumeHierarchy = struct {
         self.update_node_aabb(atlas, right_child_idx);
         self.subdivide(atlas, left_child_idx);
         self.subdivide(atlas, right_child_idx);
-    }
-
-    pub fn print(self: *const Self) void {
-        std.debug.print("BVH: {?}", self);
     }
 };

@@ -49,13 +49,13 @@ pub fn setup_box_scene(
 
     const mat_glass_outer = rc.Material{
         .kind = rc.MaterialKind.Dialectric,
-        .albedo = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
+        .albedo = .{ .x = 1.0, .y = 0.0, .z = 0.0 },
         .refractive_index = 1.5,
     };
     const mat_glass_inner = rc.Material{
         .kind = rc.MaterialKind.Dialectric,
         .albedo = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
-        .refractive_index = 1.0 / mat_glass_outer.refractive_index,
+        .refractive_index = 1.0,
     };
 
     const red = try world.register_material(mat_red);
@@ -64,7 +64,8 @@ pub fn setup_box_scene(
     const light = try world.register_material(mat_light);
     const metal = try world.register_material(mat_metal);
     const glass_outer = try world.register_material(mat_glass_outer);
-    _ = try world.register_material(mat_glass_inner);
+    const glass_inner = try world.register_material(mat_glass_inner);
+    _ = glass_inner;
 
     const base_cube = "assets/meshes/cube.txt";
     const base_ico = "assets/meshes/icosahedron.txt";
@@ -109,85 +110,8 @@ pub fn setup_box_scene(
     try world.spheres.append(.{
         .center = .{ .x = -0.0 * s.x, .y = -0.5 * s.y, .z = 0.2 * s.z },
         .radius = 0.35,
-        .material_idx = red,
+        .material_idx = green,
     });
-}
-
-pub fn fill_world(world: *core.World) !void {
-    const world_width = 50.0;
-    const world_depth = 50.0;
-    const world_height = 0.0;
-    const rad_max = 2.0;
-
-    const wireframe_mat = rc.Material{
-        .kind = rc.MaterialKind.Dialectric,
-        .refractive_index = 1.5,
-        .albedo = .{ .x = 0.5, .y = 0.5, .z = 0.5 },
-    };
-    try world.materials.append(wireframe_mat);
-
-    var prng = std.Random.DefaultPrng.init(123456);
-    var rand = prng.random();
-    const num_spheres = NUM_SPHERES;
-    for (0..num_spheres) |_| {
-        const x = (rand.float(f32) - 0.5) * world_width;
-        const z = (rand.float(f32) - 0.5) * world_depth;
-        const r = rand.float(f32) * rad_max;
-        const y = (rand.float(f32) - 0.5) * world_height + r / 2.0;
-        const mat_idx = rand.intRangeAtMost(usize, 0, 2);
-        var mat: rc.Material = undefined;
-        if (mat_idx == 0) {
-            mat = rc.Material{
-                .kind = rc.MaterialKind.Dialectric,
-                .refractive_index = 1.5,
-                .albedo = .{
-                    .x = rand.float(f32),
-                    .y = rand.float(f32),
-                    .z = rand.float(f32),
-                },
-            };
-        } else if (mat_idx == 1) {
-            mat = rc.Material{
-                .kind = rc.MaterialKind.Metal,
-                .albedo = .{
-                    .x = 0.5 + 0.5 * rand.float(f32),
-                    .y = 0.5 + 0.5 * rand.float(f32),
-                    .z = 0.5 + 0.5 * rand.float(f32),
-                },
-                .fuzz = rand.float(f32) * 0.5,
-            };
-        } else if (mat_idx == 2) {
-            mat = rc.Material{
-                .kind = rc.MaterialKind.Emissive,
-                .emit = .{
-                    .x = rand.float(f32),
-                    .y = rand.float(f32),
-                    .z = rand.float(f32),
-                },
-            };
-        }
-
-        try world.materials.append(mat);
-        try world.spheres.append(.{
-            .center = .{ .x = x, .y = y, .z = z },
-            .radius = r,
-            .material_idx = @as(u32, @intCast(world.materials.items.len - 1)),
-        });
-    }
-
-    const ground_mat = rc.Material{
-        .kind = rc.MaterialKind.Lambertian,
-        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
-    };
-    try world.materials.append(ground_mat);
-
-    try world.spheres.append(.{ .center = .{ .x = 0.0, .y = -1000.5, .z = -1.0 }, .radius = 1000.0, .material_idx = @as(u32, @intCast(world.materials.items.len - 1)) });
-
-    var icosa_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/icosahedron.txt");
-    var cube_mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/cube.txt");
-
-    _ = al.mat4_translate(&icosa_mesh.model, al.Vec3.new(1.0, 1.0, 0.0));
-    _ = al.mat4_translate(&cube_mesh.model, al.Vec3.new(-1.0, 1.0, 0.0));
 }
 
 pub fn main() !void {
@@ -220,6 +144,30 @@ pub fn main() !void {
 
     var camera = core.Camera.init_default(image_width, image_height);
 
+    var world = try core.World.init(gpa);
+    defer world.deinit();
+    try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
+
+    const n_spheres = world.spheres.items.len;
+    const n_vertex = world.mesh_atlas.vb.pos_buf.items.len;
+    const n_indices = world.mesh_atlas.indices.items.len;
+    const n_meshes = world.mesh_atlas.meshes.items.len;
+    const n_materials = world.materials.items.len;
+    var world_dev = try gpu.DeviceWorld.init(
+        n_spheres,
+        n_vertex,
+        n_indices,
+        n_meshes,
+        n_materials,
+    );
+    defer world_dev.deinit();
+
+    try world_dev.spheres.fromHost(world.spheres.items);
+    try world_dev.vb.fromHost(&world.mesh_atlas.vb);
+    try world_dev.indices.fromHost(world.mesh_atlas.indices.items);
+    try world_dev.meshes.fromHost(world.mesh_atlas.meshes.items);
+    try world_dev.materials.fromHost(world.materials.items);
+
     var shared = sim.SimSharedState{
         .frame_buffers_host = .{ img_host0, img_host1 },
         .frame_buffer_dev = try cu.CudaBuffer(u8).init(buf_size),
@@ -236,23 +184,15 @@ pub fn main() !void {
             .camera_to_world = camera.camera_to_world(),
             .inv_proj = camera.inv_proj,
         },
-        .world = try core.World.init(gpa),
-        .world_dev = try gpu.DeviceWorld.init(2, (36 * 8 + 60) * 4, (36 * 8 + 60), 9, 7),
+        .world = &world,
+        .world_dev = &world_dev,
         .frame_idx = 0,
     };
-    defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
     defer shared.frame_buffer_dev_accum.deinit();
 
-    try setup_box_scene(&shared.world, al.Vec3.new(4.0, 3.0, 10.0));
     rc.rng_init(shared.cam.image_height, shared.cam.image_width, RNG_SEED);
     defer rc.rng_deinit();
-
-    try shared.world_dev.spheres.fromHost(shared.world.spheres.items);
-    try shared.world_dev.vb.fromHost(&shared.world.mesh_atlas.vb);
-    try shared.world_dev.indices.fromHost(shared.world.mesh_atlas.indices.items);
-    try shared.world_dev.meshes.fromHost(shared.world.mesh_atlas.meshes.items);
-    try shared.world_dev.materials.fromHost(shared.world.materials.items);
 
     var bvh = core.BoundingVolumeHierarchy.init();
     bvh.build(&shared.world.mesh_atlas);

@@ -26,8 +26,8 @@ pub fn init(spheres_capacity: usize, vertex_capacity: usize, indices_capactity: 
 }
 
 pub fn deinit(self: *DeviceWorld) void {
-    self.spheres_dev.deinit();
-    self.vb_dev.deinit();
+    self.spheres.deinit();
+    self.vb.deinit();
     self.indices.deinit();
     self.meshes.deinit();
     self.materials.deinit();

@@ -7,11 +7,11 @@ pos_buf: cu.CudaBuffer(f32),
 color_buf: cu.CudaBuffer(f32),
 normal_buf: cu.CudaBuffer(f32),
 
-pub fn init(capacity: usize) !Self {
+pub fn init(vertex_capacity: usize) !Self {
     return .{
-        .pos_buf= try cu.CudaBuffer(f32).init(capacity),
-        .color_buf= try cu.CudaBuffer(f32).init(capacity),
-        .normal_buf= try cu.CudaBuffer(f32).init(capacity),
+        .pos_buf= try cu.CudaBuffer(f32).init(vertex_capacity * 4),
+        .color_buf= try cu.CudaBuffer(f32).init(vertex_capacity * 4),
+        .normal_buf= try cu.CudaBuffer(f32).init(vertex_capacity * 4),
     };
 }
 

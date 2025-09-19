@@ -13,8 +13,8 @@ pub const SimSharedState = struct {
     ready_idx: AtomicUsize, // which buffer is ready for display
     running: AtomicBool, // shutdown flag
     cam: rc.CameraData,
-    world: core.World,
-    world_dev: gpu.DeviceWorld,
+    world: *core.World,
+    world_dev: *gpu.DeviceWorld,
     frame_idx: u32,
 };
 
@@ -63,7 +63,7 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
         const current_ready = shared.ready_idx.load(.acquire);
         const write_idx: usize = 1 - current_ready;
 
-        const wd = &shared.world_dev;
+        const wd = shared.world_dev;
         rc.launch_raycast(
             try shared.frame_buffer_dev_accum.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }),
             try shared.frame_buffer_dev.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }),
