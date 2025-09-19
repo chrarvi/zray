@@ -31,3 +31,8 @@ pub extern fn launch_raycast(
     frame_idx: u32,
     temporal_averaging: bool,
 ) void;
+
+
+pub extern fn launch_clear_buffer(
+    d_img_accum: cu.TensorView(f32, 3),
+) void;

@@ -15,6 +15,7 @@ pub const SimSharedState = struct {
     cam: rc.CameraData,
     world: core.World,
     world_dev: gpu.DeviceWorld,
+    frame_idx: u32,
 };
 
 pub const Simulator = struct {
@@ -29,12 +30,11 @@ pub const Simulator = struct {
         };
     }
 
-
     pub fn start(self: *Simulator) !void {
         if (self.sim_thread != null) {
             return error.SimulationAlreadyRunning;
         }
-        self.sim_thread = try std.Thread.spawn(.{}, run_sim, .{self.state, self.frame_rate});
+        self.sim_thread = try std.Thread.spawn(.{}, run_sim, .{ self.state, self.frame_rate });
     }
 
     pub fn stop(self: *Simulator) !void {
@@ -44,11 +44,9 @@ pub const Simulator = struct {
         self.sim_thread.?.join();
         self.sim_thread = null;
     }
-
 };
 
 fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
-    var frame_idx: u32 = 0;
     const sim_dt = 1.0 / frame_rate;
     var last = try std.time.Instant.now();
 
@@ -77,12 +75,12 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
             try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
             try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
             try wd.materials.view(1, .{shared.world.materials.items.len}),
-            frame_idx,
+            shared.frame_idx,
             shared.cam.temporal_averaging,
         );
         try shared.frame_buffer_dev.toHost(shared.frame_buffers_host[write_idx]);
 
         shared.ready_idx.store(write_idx, .release);
-        frame_idx += 1;
+        shared.frame_idx += 1;
     }
 }

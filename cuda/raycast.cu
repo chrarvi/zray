@@ -528,6 +528,28 @@ EXTERN_C void launch_raycast(TensorView<float, 3> d_img_accum,
     CHECK_CUDA(cudaDeviceSynchronize());
 }
 
+__global__ void clear_buffer(TensorView<float, 3> d_buf) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    unsigned int height = d_buf.shape[0];
+    unsigned int width = d_buf.shape[1];
+    if (x >= width || y >= height) return;
+
+    d_buf.at(y, x, 0) = 0.0;
+    d_buf.at(y, x, 1) = 0.0;
+    d_buf.at(y, x, 2) = 0.0;
+}
+
+EXTERN_C void launch_clear_buffer(TensorView<float, 3> d_buf) {
+    dim3 block(32, 8);
+    dim3 grid((d_buf.shape[1] + block.x - 1) / block.x,
+                (d_buf.shape[0] + block.y - 1) / block.y);
+
+    clear_buffer<<<grid, block>>>(d_buf);
+    CHECK_CUDA(cudaPeekAtLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+}
+
 EXTERN_C void rng_deinit(void) {
     CHECK_CUDA(cudaFree(d_rng_state));
 }

@@ -43,18 +43,18 @@ pub fn setup_box_scene(
 
     const mat_metal = rc.Material{
         .kind = rc.MaterialKind.Metal,
-        .albedo = .{.x = 0.6, .y = 0.6, .z = 0.6},
+        .albedo = .{ .x = 0.6, .y = 0.6, .z = 0.6 },
         .fuzz = 0.3,
     };
 
     const mat_glass_outer = rc.Material{
         .kind = rc.MaterialKind.Dialectric,
-        .albedo = .{.x = 1.0, .y = 1.0, .z = 1.0},
+        .albedo = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
         .refractive_index = 1.5,
     };
     const mat_glass_inner = rc.Material{
         .kind = rc.MaterialKind.Dialectric,
-        .albedo = .{.x = 1.0, .y = 1.0, .z = 1.0},
+        .albedo = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
         .refractive_index = 1.0 / mat_glass_outer.refractive_index,
     };
 
@@ -231,13 +231,14 @@ pub fn main() !void {
             .image_height = image_height,
             .focal_length = 1.0,
             .samples_per_pixel = 8,
-            .temporal_averaging = true,
+            .temporal_averaging = false,
             .max_depth = 8,
             .camera_to_world = camera.camera_to_world(),
             .inv_proj = camera.inv_proj,
         },
         .world = try core.World.init(gpa),
         .world_dev = try gpu.DeviceWorld.init(2, (36 * 8 + 60) * 4, (36 * 8 + 60), 9, 7),
+        .frame_idx = 0,
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
@@ -267,15 +268,31 @@ pub fn main() !void {
 
         rl.UpdateTexture(texture, buf.ptr);
 
-        const mouseDelta = rl.GetMouseDelta();
-        camera.yaw += mouseDelta.x * camera.mouse_sensitivity;
-        camera.pitch -= mouseDelta.y * camera.mouse_sensitivity;
-        camera.update();
+        if (!shared.cam.temporal_averaging) {
+            const mouseDelta = rl.GetMouseDelta();
+            camera.yaw += mouseDelta.x * camera.mouse_sensitivity;
+            camera.pitch -= mouseDelta.y * camera.mouse_sensitivity;
+            camera.update();
 
-        if (rl.IsKeyDown(rl.KEY_W)) camera.move(.Forward);
-        if (rl.IsKeyDown(rl.KEY_S)) camera.move(.Back);
-        if (rl.IsKeyDown(rl.KEY_A)) camera.move(.Left);
-        if (rl.IsKeyDown(rl.KEY_D)) camera.move(.Right);
+            if (rl.IsKeyDown(rl.KEY_W)) camera.move(.Forward);
+            if (rl.IsKeyDown(rl.KEY_S)) camera.move(.Back);
+            if (rl.IsKeyDown(rl.KEY_A)) camera.move(.Left);
+            if (rl.IsKeyDown(rl.KEY_D)) camera.move(.Right);
+        }
+
+        if (rl.IsKeyPressed(rl.KEY_P)) {
+            rc.launch_clear_buffer(try shared.frame_buffer_dev_accum.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }));
+            shared.cam.temporal_averaging = !shared.cam.temporal_averaging;
+            if (shared.cam.temporal_averaging) {
+                shared.cam.max_depth = 16;
+                shared.cam.samples_per_pixel = 32;
+            } else {
+                shared.cam.max_depth = 4;
+                shared.cam.samples_per_pixel = 4;
+            }
+
+            shared.frame_idx = 0;
+        }
         shared.cam.camera_to_world = camera.camera_to_world();
 
         rl.BeginDrawing();
