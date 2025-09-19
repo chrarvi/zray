@@ -52,15 +52,16 @@ inline  __device__ vec3 operator/(vec3 v, float c) {
     return v * r;
 }
 
-inline  __device__ vec3 normalize(vec3 v) {
-    return v / norm(v);
-}
-
 inline  __device__ float dot(vec3 a, vec3 b) {
     return a.x*b.x + a.y* b.y + a.z*b.z;
 }
+
 inline __device__ float snorm(vec3 v) {
     return dot(v, v);
+}
+
+inline  __device__ vec3 normalize(vec3 v) {
+    return v / norm(v);
 }
 
 inline __device__ vec3 cross(vec3 a, vec3 b) {

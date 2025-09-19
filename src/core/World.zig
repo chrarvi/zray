@@ -21,3 +21,9 @@ pub fn deinit(self: *World) void {
     self.mesh_atlas.deinit();
     self.materials.deinit();
 }
+
+pub fn register_material(self: *World, mat: rc.Material) !u32 {
+    const idx = self.materials.items.len;
+    try self.materials.append(mat);
+    return @as(u32, @intCast(idx));
+}

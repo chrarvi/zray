@@ -206,8 +206,10 @@ __device__ bool mesh_hit(
                 closest = t;
                 vec3 point = ray_at(ray, t);
 
-                vec3 n0 = tri_normal, n1 = tri_normal, n2 = tri_normal;
-                if (vb->norm.shape[0] >= i + 3) {
+                vec3 n0 = tri_normal;
+                vec3 n1 = tri_normal;
+                vec3 n2 = tri_normal;
+                if (vb->norm.shape[0] >= max(i0, max(i1, i2))) {
                     n0 = normalize(tv_get_vec3(vb->norm, i + 0));
                     n1 = normalize(tv_get_vec3(vb->norm, i + 1));
                     n2 = normalize(tv_get_vec3(vb->norm, i + 2));
@@ -230,10 +232,7 @@ __device__ bool mesh_hit(
                 hit_record->u = u;
                 hit_record->v = v;
 
-                hit_record->material.albedo = material->albedo;
-                hit_record->material.emit = material->emit;
-                hit_record->material.fuzz = material->fuzz;
-                hit_record->material.kind = material->kind;
+                hit_record->material = *material;
             }
         }
     }
@@ -328,6 +327,7 @@ __device__ ScatterResult scatter_material(
             break;
         }
         case MAT_DIELECTRIC: {
+            // Attenuation is always one, glass surface absorbs nothing.
             result.attenuation = {1.0, 1.0, 1.0};
             result.did_scatter = true;
             float ri = hit.front_face ? (1.0f / mat.refractive_index) : mat.refractive_index;
@@ -344,8 +344,10 @@ __device__ ScatterResult scatter_material(
                 direction = refract(unit_dir, hit.normal, ri);
             }
 
-            result.scattered_ray.origin = hit.point;
-            result.scattered_ray.dir    = direction;
+            result.scattered_ray = Ray{
+                hit.point + 1e-4f * direction,
+                direction
+            };
             break;
         }
     }
@@ -487,11 +489,13 @@ EXTERN_C void rng_init(size_t image_height, size_t image_width, int seed) {
 }
 
 EXTERN_C void launch_raycast(TensorView<float, 3> d_img_accum,
-                             TensorView<char, 3> d_img,
-                             const CameraData *cam,
-                             TensorView<Sphere, 1> d_spheres, TensorView<float, 2> d_vb_pos,
-                             TensorView<float, 2> d_vb_color, TensorView<float, 2> d_vb_norm,
-                             TensorView<uint32_t, 1> d_indices, TensorView<Mesh, 1> d_meshes,
+                             TensorView<char, 3> d_img, const CameraData *cam,
+                             TensorView<Sphere, 1> d_spheres,
+                             TensorView<float, 2> d_vb_pos,
+                             TensorView<float, 2> d_vb_color,
+                             TensorView<float, 2> d_vb_norm,
+                             TensorView<uint32_t, 1> d_indices,
+                             TensorView<Mesh, 1> d_meshes,
                              TensorView<Material, 1> d_materials,
                              unsigned int frame_idx,
                              bool temporal_averaging) {

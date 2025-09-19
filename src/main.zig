@@ -38,17 +38,33 @@ pub fn setup_box_scene(
     };
     const mat_light = rc.Material{
         .kind = rc.MaterialKind.Emissive,
-        .emit = .{ .x = 0.95 * 10.0, .y = 0.9 * 10.0, .z = 0.7 * 10.0 }, // yellowish
+        .emit = .{ .x = 0.95 * 10.0, .y = 0.7 * 10.0, .z = 0.7 * 10.0 }, // yellowish
     };
 
-    try world.materials.append(mat_red);
-    const red = 0;
-    try world.materials.append(mat_gray);
-    const gray = 1;
-    try world.materials.append(mat_green);
-    const green = 2;
-    try world.materials.append(mat_light);
-    const light = 3;
+    const mat_metal = rc.Material{
+        .kind = rc.MaterialKind.Metal,
+        .albedo = .{.x = 0.6, .y = 0.6, .z = 0.6},
+        .fuzz = 0.3,
+    };
+
+    const mat_glass_outer = rc.Material{
+        .kind = rc.MaterialKind.Dialectric,
+        .albedo = .{.x = 1.0, .y = 1.0, .z = 1.0},
+        .refractive_index = 1.5,
+    };
+    const mat_glass_inner = rc.Material{
+        .kind = rc.MaterialKind.Dialectric,
+        .albedo = .{.x = 1.0, .y = 1.0, .z = 1.0},
+        .refractive_index = 1.0 / mat_glass_outer.refractive_index,
+    };
+
+    const red = try world.register_material(mat_red);
+    const gray = try world.register_material(mat_gray);
+    const green = try world.register_material(mat_green);
+    const light = try world.register_material(mat_light);
+    const metal = try world.register_material(mat_metal);
+    const glass_outer = try world.register_material(mat_glass_outer);
+    _ = try world.register_material(mat_glass_inner);
 
     const base_cube = "assets/meshes/cube.txt";
     const base_ico = "assets/meshes/icosahedron.txt";
@@ -73,8 +89,8 @@ pub fn setup_box_scene(
         .{ .name = base_cube, .scale = al.Vec3.new(0.2 * s.x, 0.1 * s.y, 0.2 * s.z), .translate = al.Vec3.new(0.0, 0.9 * s.y, 0.0), .mat = light },
 
         // props
-        .{ .name = base_cube, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.3 * s.x, -0.7 * s.y, 0.0), .mat = gray },
-        .{ .name = base_ico, .scale = al.Vec3.full(1.0), .translate = al.Vec3.new(-0.3 * s.x, -0.6 * s.y, 0.0), .mat = gray },
+        .{ .name = base_cube, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.3 * s.x, -0.7 * s.y, -0.5 * s.z), .mat = metal },
+        .{ .name = base_ico, .scale = al.Vec3.full(1.0), .translate = al.Vec3.new(-0.3 * s.x, -0.6 * s.y, -0.2 * s.z), .mat = metal },
     };
 
     for (instances) |desc| {
@@ -83,6 +99,18 @@ pub fn setup_box_scene(
         _ = al.mat4_translate(&mesh.model, desc.translate);
         mesh.material_idx = desc.mat;
     }
+
+    // mock sphere
+    try world.spheres.append(.{
+        .center = .{ .x = -0.0 * s.x, .y = -0.5 * s.y, .z = 0.2 * s.z },
+        .radius = 0.5,
+        .material_idx = glass_outer,
+    });
+    try world.spheres.append(.{
+        .center = .{ .x = -0.0 * s.x, .y = -0.5 * s.y, .z = 0.2 * s.z },
+        .radius = 0.35,
+        .material_idx = red,
+    });
 }
 
 pub fn fill_world(world: *core.World) !void {
@@ -204,12 +232,12 @@ pub fn main() !void {
             .focal_length = 1.0,
             .samples_per_pixel = 8,
             .temporal_averaging = true,
-            .max_depth = 4,
+            .max_depth = 8,
             .camera_to_world = camera.camera_to_world(),
             .inv_proj = camera.inv_proj,
         },
         .world = try core.World.init(gpa),
-        .world_dev = try gpu.DeviceWorld.init(1, (36 * 8 + 60) * 4, (36 * 8 + 60), 9, 4),
+        .world_dev = try gpu.DeviceWorld.init(2, (36 * 8 + 60) * 4, (36 * 8 + 60), 9, 7),
     };
     defer shared.world.deinit();
     defer shared.frame_buffer_dev.deinit();
