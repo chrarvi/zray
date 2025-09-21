@@ -6,6 +6,7 @@ pub const CameraData = rc.CameraData;
 pub const Material = rc.Material;
 pub const Mesh = rc.Mesh;
 pub const AABB = rc.AABB;
+pub const BVHNode = rc.BVHNode;
 
 pub const MaterialKind = struct {
     pub const Lambertian = rc.MAT_LAMBERTIAN;
@@ -22,13 +23,15 @@ pub extern fn launch_raycast(
     d_img_accum: cu.TensorView(f32, 3),
     d_img: cu.TensorView(u8, 3),
     cam: *rc.CameraData,
-    d_spheres: cu.TensorView(rc.Sphere, 1),
+    d_spheres: cu.TensorView(Sphere, 1),
     d_vb_pos: cu.TensorView(f32, 2),
     d_vb_color: cu.TensorView(f32, 2),
     d_vb_normal: cu.TensorView(f32, 2),
     d_indices: cu.TensorView(u32, 1),
-    d_meshes: cu.TensorView(rc.Mesh, 1),
-    d_materials: cu.TensorView(rc.Material, 1),
+    d_meshes: cu.TensorView(Mesh, 1),
+    d_materials: cu.TensorView(Material, 1),
+    d_bvh_nodes: cu.TensorView(BVHNode, 1),
+    d_bvh_prim_indices: cu.TensorView(u32, 1),
     frame_idx: u32,
     temporal_averaging: bool,
 ) void;

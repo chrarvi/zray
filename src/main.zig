@@ -22,7 +22,7 @@ const NUM_SPHERES = 4;
 
 pub fn setup_bvh_scene(
     world: *core.World,
-    bvh: *const core.BoundingVolumeHierarchy,
+    bvh: *const core.BVHBuilder,
 ) !void {
     const mat_wire_id = try world.register_material(.{
         .kind = rc.MaterialKind.Lambertian,
@@ -222,9 +222,11 @@ pub fn main() !void {
     // try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
     // try setup_teapot_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
 
-    var bvh = core.BoundingVolumeHierarchy.init(gpa);
-    try bvh.build(&world.mesh_atlas, 10);
-    try setup_bvh_scene(&world, &bvh);
+    // var bvh = core.BVHBuilder.init(gpa);
+    // try bvh.build(&world.mesh_atlas, 10);
+    // try setup_bvh_scene(&world, &bvh);
+    const bvh_max_depth = 10;
+    try world.bvh.build(&world.mesh_atlas, bvh_max_depth);
 
     const n_spheres = world.spheres.items.len;
     const n_vertex = world.mesh_atlas.vb.pos_buf.items.len;
@@ -237,6 +239,7 @@ pub fn main() !void {
         n_indices,
         n_meshes,
         n_materials,
+        bvh_max_depth,
     );
     defer world_dev.deinit();
 
@@ -245,6 +248,7 @@ pub fn main() !void {
     try world_dev.indices.fromHost(world.mesh_atlas.indices.items);
     try world_dev.meshes.fromHost(world.mesh_atlas.meshes.items);
     try world_dev.materials.fromHost(world.materials.items);
+    try world_dev.bvh_to_device(&world.bvh, gpa);
 
     var shared = sim.SimSharedState{
         .frame_buffers_host = .{ img_host0, img_host1 },

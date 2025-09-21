@@ -10,4 +10,4 @@ pub const World = @import("World.zig");
 pub const MeshAtlas = @import("mesh.zig").MeshAtlas;
 pub const Mesh = @import("mesh.zig").Mesh;
 
-pub const BoundingVolumeHierarchy = @import("bvh.zig").BoundingVolumeHierarchy;
+pub const BVHBuilder = @import("bvh.zig").BVHBuilder;

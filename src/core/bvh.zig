@@ -4,7 +4,7 @@ const al = @import("linalg.zig");
 const core = @import("core.zig");
 const std = @import("std");
 
-pub const BoundingVolumeHierarchy = struct {
+pub const BVHBuilder = struct {
     const Self = @This();
 
     const AABB = struct {
@@ -37,37 +37,43 @@ pub const BoundingVolumeHierarchy = struct {
 
     const Node = struct {
         box: AABB,
-        left_idx: ?usize = null,
-        right_idx: ?usize = null,  // not required, it's always left + 1
-        prims_offset: usize,
-        prims_count: usize,
-        depth: usize,  // debug, get rid of to save space
+        left_idx: i32 = -1,
+        right_idx: i32 = -1,  // not required, it's always left + 1
+        prims_offset: u32,
+        prims_count: u32,
+        depth: u32,  // debug, get rid of to save space
     };
 
     nodes: std.ArrayList(Node),
-    prim_indices: std.ArrayList(usize),
+    prim_indices: std.ArrayList(u32),
 
     pub fn init(alloc: std.mem.Allocator) Self {
         return Self{
             .nodes = std.ArrayList(Node).init(alloc),
-            .prim_indices = std.ArrayList(usize).init(alloc),
+            .prim_indices = std.ArrayList(u32).init(alloc),
         };
     }
+    pub fn deinit(self: *BVHBuilder) void {
+        self.nodes.deinit();
+        self.prim_indices.deinit();
+    }
 
-    pub fn build(self: *Self, atlas: *const core.MeshAtlas, max_depth: usize) !void {
+    pub fn build(self: *Self, atlas: *const core.MeshAtlas, max_depth: u32) !void {
         const n_tris = atlas.num_triangles();
         for (0..n_tris) |ti| {
-            try self.prim_indices.append(ti);
+            try self.prim_indices.append(@as(u32, @intCast(ti)));
         }
 
         // Do this up front to save ourselves reallocations
-        try self.nodes.ensureTotalCapacity(std.math.pow(usize, 2, max_depth + 1) - 1);
+        try self.nodes.ensureTotalCapacity(std.math.pow(u32, 2, max_depth + 1) - 1);
 
         var root = try self.nodes.addOne();
         root.box = AABB.unbounded();
         root.prims_offset = 0;
-        root.prims_count = n_tris;
+        root.prims_count = @as(u32, @intCast(n_tris));
         root.depth = 0;  // del
+        root.left_idx = -1;
+        root.right_idx = -1;
         self.update_node_aabb(atlas, root);
 
         try self.subdivide(atlas, root, 1, max_depth);
@@ -85,12 +91,12 @@ pub const BoundingVolumeHierarchy = struct {
         }
     }
 
-    fn subdivide(self: *Self, atlas: *const core.MeshAtlas, node: *Node, current_depth: usize, max_depth: usize) !void {
+    fn subdivide(self: *Self, atlas: *const core.MeshAtlas, node: *Node, current_depth: u32, max_depth: u32) !void {
         if (node.prims_count <= 2) return;
         if (current_depth > max_depth) return;
 
         const extent = node.box.extent();
-        var axis: usize = 0;
+        var axis: u32 = 0;
         if (extent.y > extent.x) axis = 1;
         if (extent.z > extent.get(axis)) axis = 2;
         const split_pos = (node.box.min.get(axis) + node.box.max.get(axis)) * 0.5;
@@ -111,7 +117,7 @@ pub const BoundingVolumeHierarchy = struct {
             }
         }
 
-        const left_count: usize = i - node.prims_offset;
+        const left_count: u32 = i - node.prims_offset;
         if ((left_count == 0) or (left_count == node.prims_count)) return;
 
         const left_child_idx = self.nodes.items.len;
@@ -126,8 +132,8 @@ pub const BoundingVolumeHierarchy = struct {
         right_node.prims_count = node.prims_count - left_count;
         right_node.depth = current_depth;  // del
 
-        node.left_idx = left_child_idx;
-        node.right_idx = right_child_idx;
+        node.left_idx = @as(i32, @intCast(left_child_idx));
+        node.right_idx = @as(i32, @intCast(right_child_idx));
         node.prims_count = 0; // turns it into an internal node
 
         self.update_node_aabb(atlas, left_node);

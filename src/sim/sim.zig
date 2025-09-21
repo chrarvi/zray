@@ -88,6 +88,8 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
             try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
             try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
             try wd.materials.view(1, .{shared.world.materials.items.len}),
+            try wd.bvh_nodes.view(1, .{std.math.pow(u32, 2, 10 + 1) - 1}),
+            try wd.bvh_prim_indices.view(1, .{shared.world.bvh.prim_indices.items.len}),
             shared.frame_idx,
             shared.cam.temporal_averaging,
         );

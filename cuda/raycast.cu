@@ -63,6 +63,7 @@ typedef struct {
     TensorView<uint32_t, 1> indices;
     TensorView<Mesh, 1> meshes;
     TensorView<Material, 1> materials;
+    TensorView<BVHNode, 1> bvh;
 } Scene;
 
 __device__ inline vec3 tv_get_vec3(TensorView<float, 2> tv, size_t i) {
@@ -485,7 +486,8 @@ EXTERN_C void launch_raycast(
     TensorView<float, 2> d_vb_pos, TensorView<float, 2> d_vb_color,
     TensorView<float, 2> d_vb_norm, TensorView<uint32_t, 1> d_indices,
     TensorView<Mesh, 1> d_meshes, TensorView<Material, 1> d_materials,
-    unsigned int frame_idx, bool temporal_averaging) {
+    TensorView<BVHNode, 1> d_bvh, unsigned int frame_idx,
+    bool temporal_averaging) {
     // d_img: height, width 3
     // d_spheres: n_spheres
     // d_vb_pos: n_vertex, 3
@@ -505,6 +507,7 @@ EXTERN_C void launch_raycast(
         .indices = d_indices,
         .meshes = d_meshes,
         .materials = d_materials,
+        .bvh = d_bvh,
     };
 
     dim3 block(32, 8);
@@ -608,9 +611,7 @@ __device__ AABB aabb_init() {
 }
 
 __device__ bool aabb_valid(const AABB& b) {
-    return b.min.x <= b.max.x &&
-           b.min.y <= b.max.y &&
-           b.min.z <= b.max.z;
+    return b.min.x <= b.max.x && b.min.y <= b.max.y && b.min.z <= b.max.z;
 }
 
 __device__ void aabb_extend(AABB& box, vec3 p) {
@@ -625,17 +626,14 @@ __device__ void aabb_merge(AABB& box, const AABB& other) {
 }
 
 __global__ void compute_aabb_kernel_stage1(
-    TensorView<float, 2> d_vb_pos,
-    TensorView<uint32_t, 1> d_indices,
-    TensorView<Mesh, 1> d_meshes,
-    TensorView<AABB, 1> d_partial_boxes)
-{
-    unsigned int block_id   = blockIdx.x;
-    unsigned int thread_id  = threadIdx.x;
+    TensorView<float, 2> d_vb_pos, TensorView<uint32_t, 1> d_indices,
+    TensorView<Mesh, 1> d_meshes, TensorView<AABB, 1> d_partial_boxes) {
+    unsigned int block_id = blockIdx.x;
+    unsigned int thread_id = threadIdx.x;
     unsigned int global_tid = block_id * blockDim.x + thread_id;
-    unsigned int stride     = blockDim.x * gridDim.x;
+    unsigned int stride = blockDim.x * gridDim.x;
 
-    extern __shared__ AABB sdata[]; // one per thread for local reductions
+    extern __shared__ AABB sdata[];  // one per thread for local reductions
 
     for (unsigned int mesh_idx = 0; mesh_idx < d_meshes.shape[0]; ++mesh_idx) {
         const Mesh& mesh = d_meshes.at(mesh_idx);
@@ -664,15 +662,13 @@ __global__ void compute_aabb_kernel_stage1(
         if (thread_id == 0) {
             d_partial_boxes.at(mesh_idx * gridDim.x + block_id) = sdata[0];
         }
-        __syncthreads(); // ensure clean slate before next mesh
+        __syncthreads();  // ensure clean slate before next mesh
     }
 }
 
-__global__ void compute_aabb_kernel_stage2(
-    TensorView<AABB, 1> d_partial_boxes,
-    TensorView<Mesh, 1> d_meshes,
-    unsigned int num_blocks)
-{
+__global__ void compute_aabb_kernel_stage2(TensorView<AABB, 1> d_partial_boxes,
+                                           TensorView<Mesh, 1> d_meshes,
+                                           unsigned int num_blocks) {
     unsigned int mesh_idx = blockIdx.x;
     unsigned int tid = threadIdx.x;
 
@@ -700,15 +696,13 @@ __global__ void compute_aabb_kernel_stage2(
 }
 
 /// Parallel reduction of mesh bounding boxes.
-EXTERN_C void compute_aabb(
-    TensorView<float, 2> d_vb_pos,
-    TensorView<uint32_t, 1> d_indices,
-    TensorView<Mesh, 1> d_meshes,
-    TensorView<AABB, 1> d_partial_aabb)
-{
+EXTERN_C void compute_aabb(TensorView<float, 2> d_vb_pos,
+                           TensorView<uint32_t, 1> d_indices,
+                           TensorView<Mesh, 1> d_meshes,
+                           TensorView<AABB, 1> d_partial_aabb) {
     unsigned int num_vertices = d_vb_pos.shape[0];
     unsigned int threads = 256;
-    unsigned int blocks  = (num_vertices + threads - 1) / threads;
+    unsigned int blocks = (num_vertices + threads - 1) / threads;
 
     // stage 1: one AABB per block per mesh
     size_t shmem_stage1 = threads * sizeof(AABB);
@@ -719,8 +713,9 @@ EXTERN_C void compute_aabb(
     // stage 2: reduce block AABBs per mesh
     unsigned int threads_stage2 = 128;
     size_t shmem_stage2 = threads_stage2 * sizeof(AABB);
-    compute_aabb_kernel_stage2<<<d_meshes.shape[0], threads_stage2, shmem_stage2>>>(
-        d_partial_aabb, d_meshes, blocks);
+    compute_aabb_kernel_stage2<<<d_meshes.shape[0], threads_stage2,
+                                 shmem_stage2>>>(d_partial_aabb, d_meshes,
+                                                 blocks);
     CHECK_CUDA(cudaPeekAtLastError());
 
     CHECK_CUDA(cudaDeviceSynchronize());
