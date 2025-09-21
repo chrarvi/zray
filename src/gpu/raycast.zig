@@ -5,6 +5,7 @@ pub const Sphere = rc.Sphere;
 pub const CameraData = rc.CameraData;
 pub const Material = rc.Material;
 pub const Mesh = rc.Mesh;
+pub const AABB = rc.AABB;
 
 pub const MaterialKind = struct {
     pub const Lambertian = rc.MAT_LAMBERTIAN;
@@ -32,6 +33,12 @@ pub extern fn launch_raycast(
     temporal_averaging: bool,
 ) void;
 
+pub extern fn model_to_world(
+    d_vb_pos: cu.TensorView(f32, 2), // (num_vertices, 3)
+    d_vb_normal: cu.TensorView(f32, 2),
+    d_indices: cu.TensorView(u32, 1),
+    d_meshes: cu.TensorView(rc.Mesh, 1),
+) void;
 
 pub extern fn launch_clear_buffer(
     d_img_accum: cu.TensorView(f32, 3),

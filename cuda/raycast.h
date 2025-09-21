@@ -27,6 +27,11 @@ typedef struct {
 } vec4;
 
 typedef struct {
+    vec3 min;
+    vec3 max;
+} AABB;
+
+typedef struct {
     unsigned int image_width;
     unsigned int image_height;
     float focal_length;
@@ -59,10 +64,12 @@ typedef struct {
     unsigned int material_idx;
 } Sphere;
 
+
 typedef struct {
     unsigned int index_start;
     unsigned int index_count;
     mat4 model;
+    AABB box;
     unsigned int material_idx;
 } Mesh;
 

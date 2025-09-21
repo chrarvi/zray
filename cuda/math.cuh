@@ -4,72 +4,64 @@
 #include <cuda_runtime.h>
 #include <curand.h>
 #include <curand_kernel.h>
-
 #include <math.h>
+
 #include <cmath>
 
 #define PI 3.14159265358979323846f
 
-inline __device__ float norm(vec3 v) {
-    return norm3df(v.x, v.y, v.z);
-}
-inline  __device__ float rnorm(vec3 v) {
-    return rnorm3df(v.x, v.y, v.z);
-}
+inline __device__ float norm(vec3 v) { return norm3df(v.x, v.y, v.z); }
+inline __device__ float rnorm(vec3 v) { return rnorm3df(v.x, v.y, v.z); }
 
-inline  __device__ vec3 operator-(vec3 a, vec3 b) {
+inline __device__ vec3 operator-(vec3 a, vec3 b) {
     return {a.x - b.x, a.y - b.y, a.z - b.z};
 }
 
-inline  __device__ vec3 operator-(vec3 a, float b) {
+inline __device__ vec3 operator-(vec3 a, float b) {
     return {a.x - b, a.y - b, a.z - b};
 }
 
-inline  __device__ vec3 operator+(vec3 a, vec3 b) {
+inline __device__ vec3 operator+(vec3 a, vec3 b) {
     return {a.x + b.x, a.y + b.y, a.z + b.z};
 }
 
-inline  __device__ vec3 operator+(vec3 a, float b) {
+inline __device__ vec3 operator+(vec3 a, float b) {
     return {a.x + b, a.y + b, a.z + b};
 }
 
-inline  __device__ vec3 operator+(float a, vec3 b) {
+inline __device__ vec3 operator+(float a, vec3 b) {
     return {a + b.x, a + b.y, a + b.z};
 }
 
-inline  __device__ vec3 operator*(vec3 v, float c) {
+inline __device__ vec3 operator*(vec3 v, float c) {
     return {v.x * c, v.y * c, v.z * c};
 }
-inline  __device__ vec3 operator*(vec3 a, vec3 b) {
+inline __device__ vec3 operator*(vec3 a, vec3 b) {
     return {a.x * b.x, a.y * b.y, a.z * b.z};
 }
-inline  __device__ vec3 operator*(float a, vec3 b) {
+inline __device__ vec3 operator*(float a, vec3 b) {
     return {a * b.x, a * b.y, a * b.z};
 }
 
-inline  __device__ vec3 operator/(vec3 v, float c) {
-    const float r = 1/c;
+inline __device__ vec3 operator/(vec3 v, float c) {
+    const float r = 1 / c;
     return v * r;
 }
-
-inline  __device__ float dot(vec3 a, vec3 b) {
-    return a.x*b.x + a.y* b.y + a.z*b.z;
+inline __device__ vec3 operator/(float c, vec3 v) {
+    return {c / v.x, c / v.y, c / v.z};
 }
 
-inline __device__ float snorm(vec3 v) {
-    return dot(v, v);
+inline __device__ float dot(vec3 a, vec3 b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-inline  __device__ vec3 normalize(vec3 v) {
-    return v / norm(v);
-}
+inline __device__ float snorm(vec3 v) { return dot(v, v); }
+
+inline __device__ vec3 normalize(vec3 v) { return v / norm(v); }
 
 inline __device__ vec3 cross(vec3 a, vec3 b) {
-    return vec3 {
-        a.y*b.z - a.z*b.y,
-        a.z*b.x - a.x*b.z,
-        a.x*b.y - a.y*b.x
-    };
+    return vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z,
+                a.x * b.y - a.y * b.x};
 }
 
 inline __device__ vec3 fminf(vec3 v, float c) {
@@ -80,7 +72,31 @@ inline __device__ vec3 fminf(vec3 v, float c) {
     };
 }
 
-inline  __device__ vec3 clamp(vec3 v, float mn, float mx) {
+inline __device__ vec3 fminf(vec3 a, vec3 b) {
+    return {
+        fminf(a.x, b.x),
+        fminf(a.y, b.y),
+        fminf(a.z, b.z),
+    };
+}
+
+inline __device__ vec3 fmaxf(vec3 a, vec3 b) {
+    return {
+        fmaxf(a.x, b.x),
+        fmaxf(a.y, b.y),
+        fmaxf(a.z, b.z),
+    };
+}
+
+inline __device__ float fminf(vec3 v) {
+    return fminf(v.x, fminf(v.y, v.z));
+}
+
+inline __device__ float fmaxf(vec3 v) {
+    return fmaxf(v.x, fmaxf(v.y, v.z));
+}
+
+inline __device__ vec3 clamp(vec3 v, float mn, float mx) {
     return {
         fmaxf(fminf(v.x, mx), mn),
         fmaxf(fminf(v.y, mx), mn),
@@ -88,12 +104,13 @@ inline  __device__ vec3 clamp(vec3 v, float mn, float mx) {
     };
 }
 
-inline  __device__ bool near_zero(vec3 v) {
+inline __device__ bool near_zero(vec3 v) {
     float s = 1e-8f;
     return (fabsf(v.x) < s) && (fabsf(v.y) < s) && (fabsf(v.z) < s);
 }
 
-inline  __device__ vec3 random_float3_uniform(curandState* local_state, float mn, float mx) {
+inline __device__ vec3 random_float3_uniform(curandState* local_state, float mn,
+                                             float mx) {
     float c = mn + (mx - mn);
     float x = c * curand_uniform(local_state);
     float y = c * curand_uniform(local_state);
@@ -102,7 +119,7 @@ inline  __device__ vec3 random_float3_uniform(curandState* local_state, float mn
     return {x, y, z};
 }
 
-inline  __device__ vec3 random_unit_vector(curandState* local_state) {
+inline __device__ vec3 random_unit_vector(curandState* local_state) {
     // pretty expensive but it's better than rejection sampling
     float u = curand_uniform(local_state);
     float theta = 2.0f * PI * curand_uniform(local_state);
@@ -116,7 +133,8 @@ inline  __device__ vec3 random_unit_vector(curandState* local_state) {
     return {x, y, z};
 }
 
-inline  __device__ vec3 random_on_hemisphere(curandState* local_state, const vec3 normal) {
+inline __device__ vec3 random_on_hemisphere(curandState* local_state,
+                                            const vec3 normal) {
     vec3 on_unit_sphere = random_unit_vector(local_state);
     if (dot(on_unit_sphere, normal) > 0.0) {
         return on_unit_sphere;
@@ -125,7 +143,7 @@ inline  __device__ vec3 random_on_hemisphere(curandState* local_state, const vec
     }
 }
 
-inline  __device__ vec3 reflect(vec3 v, vec3 n) {
+inline __device__ vec3 reflect(vec3 v, vec3 n) {
     return v - 2.0f * dot(v, n) * n;
 }
 
@@ -143,29 +161,12 @@ inline __device__ float reflectance(float cosine, float ref_idx) {
     return r0 + (1.0f - r0) * powf(1.0f - cosine, 5);
 }
 
-inline __device__ vec4 lmmul(const float M[4][4], const vec4 v) {
-    vec4 r;
-    r.x = M[0][0] * v.x + M[0][1] * v.y + M[0][2] * v.z + M[0][3] * v.w;
-    r.y = M[1][0] * v.x + M[1][1] * v.y + M[1][2] * v.z + M[1][3] * v.w;
-    r.z = M[2][0] * v.x + M[2][1] * v.y + M[2][2] * v.z + M[2][3] * v.w;
-    r.w = M[3][0] * v.x + M[3][1] * v.y + M[3][2] * v.z + M[3][3] * v.w;
-    return r;
-}
-
-inline __device__ vec4 rmmul(const vec4 v, const float M[4][4]) {
-    vec4 r;
-    r.x = M[0][0] * v.x + M[1][0] * v.y + M[2][0] * v.z + M[3][0] * v.w;
-    r.y = M[0][1] * v.x + M[1][1] * v.y + M[2][1] * v.z + M[3][1] * v.w;
-    r.z = M[0][2] * v.x + M[1][2] * v.y + M[2][2] * v.z + M[3][2] * v.w;
-    r.w = M[0][3] * v.x + M[1][3] * v.y + M[2][3] * v.z + M[3][3] * v.w;
-    return r;
-}
-
-inline __device__ vec3 lerp(const vec3 &a, const vec3 &b, float t) {
+inline __device__ vec3 lerp(const vec3& a, const vec3& b, float t) {
     return t * a + (1 - t) * b;
 }
 
-inline __device__ vec3 bary_lerp(const vec3& a, const vec3& b, const vec3& c, float u, float v) {
+inline __device__ vec3 bary_lerp(const vec3& a, const vec3& b, const vec3& c,
+                                 float u, float v) {
     // barycentric weights: w = 1 - u - v
     float w = 1.0f - u - v;
     return w * a + u * b + v * c;
@@ -180,11 +181,131 @@ inline __device__ bool range_surrounds(float v, float min, float max) {
 }
 
 inline __device__ vec3 color_linear_to_gamma(vec3 c) {
-    return vec3{
-        sqrtf(fmaxf(0.0, c.x)),
-        sqrtf(fmaxf(0.0, c.y)),
-        sqrtf(fmaxf(0.0, c.z))
-    };
+    return vec3{sqrtf(fmaxf(0.0, c.x)), sqrtf(fmaxf(0.0, c.y)),
+                sqrtf(fmaxf(0.0, c.z))};
 }
 
-#endif // MATH_CUH_
+// mat4
+
+inline __device__ void mat4_transpose(const mat4 M, mat4 R) {
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            R[r][c] = M[c][r];
+        }
+    }
+}
+
+inline __device__ bool mat4_inverse(const mat4 M, mat4 R) {
+    float inv[16];
+    float m[16];
+
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            m[r * 4 + c] = M[r][c];
+        }
+    }
+
+    inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] +
+             m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+
+    inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] +
+             m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] +
+             m[12] * m[7] * m[10];
+
+    inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] +
+             m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+
+    inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] +
+              m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] +
+              m[12] * m[6] * m[9];
+
+    inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] +
+             m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] +
+             m[13] * m[3] * m[10];
+
+    inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] +
+             m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+
+    inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] -
+             m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+
+    inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] +
+              m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+
+    inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] +
+             m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+
+    inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] -
+             m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+
+    inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] +
+              m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+
+    inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] -
+              m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+
+    inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] -
+             m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+
+    inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] +
+             m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+
+    inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] -
+              m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+
+    inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] +
+              m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+
+    float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+    if (fabsf(det) < 1e-8f) return false;  // not invertible
+
+    det = 1.0f / det;
+    for (int i = 0; i < 16; i++) inv[i] *= det;
+
+    // write result back into R
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            R[r][c] = inv[r * 4 + c];
+        }
+    }
+
+    return true;
+}
+
+inline __device__ vec4 mat4_lmmul(const float M[4][4], const vec4 v) {
+    vec4 r;
+    r.x = M[0][0] * v.x + M[0][1] * v.y + M[0][2] * v.z + M[0][3] * v.w;
+    r.y = M[1][0] * v.x + M[1][1] * v.y + M[1][2] * v.z + M[1][3] * v.w;
+    r.z = M[2][0] * v.x + M[2][1] * v.y + M[2][2] * v.z + M[2][3] * v.w;
+    r.w = M[3][0] * v.x + M[3][1] * v.y + M[3][2] * v.z + M[3][3] * v.w;
+    return r;
+}
+
+inline __device__ vec4 mat4_rmmul(const vec4 v, const float M[4][4]) {
+    vec4 r;
+    r.x = M[0][0] * v.x + M[1][0] * v.y + M[2][0] * v.z + M[3][0] * v.w;
+    r.y = M[0][1] * v.x + M[1][1] * v.y + M[2][1] * v.z + M[3][1] * v.w;
+    r.z = M[0][2] * v.x + M[1][2] * v.y + M[2][2] * v.z + M[3][2] * v.w;
+    r.w = M[0][3] * v.x + M[1][3] * v.y + M[2][3] * v.z + M[3][3] * v.w;
+    return r;
+}
+
+inline __device__ vec3 mat3_lmmul(const float M[4][4], const vec3 v) {
+    vec3 r;
+    r.x = M[0][0] * v.x + M[0][1] * v.y + M[0][2] * v.z;
+    r.y = M[1][0] * v.x + M[1][1] * v.y + M[1][2] * v.z;
+    r.z = M[2][0] * v.x + M[2][1] * v.y + M[2][2] * v.z;
+    return r;
+}
+
+inline __device__ bool normal_matrix_from_mat4(const mat4 M, mat4 out) {
+    // Inverse–transpose of the model matrix
+    mat4 invM;
+    if (!mat4_inverse(M, invM)) {
+        return false;
+    }
+    mat4_transpose(invM, out);
+    return true;
+}
+
+#endif  // MATH_CUH_

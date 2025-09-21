@@ -152,6 +152,22 @@ __device__ bool triangle_hit(
     return true;
 }
 
+// SLAB aabb intersection test
+__device__ bool aabb_hit(const Ray* ray, const AABB* box) {
+    vec3 recip_dir = 1.0f / ray->dir;
+
+    vec3 t_low = (box->min - ray->origin) * recip_dir;
+    vec3 t_high = (box->max - ray->origin) * recip_dir;
+
+    vec3 t_vec_close = fminf(t_low, t_high);
+    vec3 t_vec_far = fmaxf(t_low, t_high);
+
+    float t_close = fmaxf(t_vec_close);
+    float t_far   = fminf(t_vec_far);
+
+    return (t_close <= t_far) && (t_far >= 0.0f);
+}
+
 __device__ bool mesh_hit(
     const Ray* ray,
     const VertexBuffers* vb,
@@ -171,6 +187,15 @@ __device__ bool mesh_hit(
         Mesh* mesh = &meshes.at(m);
         // todo: skip mesh if ray does not intersect the mesh bounding box at all
 
+        AABB box = {
+            .min = {-1, -1, -1},
+            .max = {1, 1, 1},
+        };
+        if (!aabb_hit(ray, &box)) {
+            continue;
+        }
+
+
         uint32_t start = mesh->index_start;
         uint32_t end   = start + mesh->index_count;
 
@@ -181,21 +206,9 @@ __device__ bool mesh_hit(
             uint32_t i1 = indices.at(i+1);
             uint32_t i2 = indices.at(i+2);
 
-            vec3 p0 = tv_get_vec3(vb->pos, i0);
-            vec3 p1 = tv_get_vec3(vb->pos, i1);
-            vec3 p2 = tv_get_vec3(vb->pos, i2);
-
-            vec4 p0_h = vec4{p0.x, p0.y, p0.z, 1.0};
-            vec4 p1_h = vec4{p1.x, p1.y, p1.z, 1.0};
-            vec4 p2_h = vec4{p2.x, p2.y, p2.z, 1.0};
-
-            vec4 p0_world_h = lmmul(mesh->model, p0_h);
-            vec4 p1_world_h = lmmul(mesh->model, p1_h);
-            vec4 p2_world_h = lmmul(mesh->model, p2_h);
-
-            vec3 p0_world = vec3{p0_world_h.x, p0_world_h.y, p0_world_h.z};
-            vec3 p1_world = vec3{p1_world_h.x, p1_world_h.y, p1_world_h.z};
-            vec3 p2_world = vec3{p2_world_h.x, p2_world_h.y, p2_world_h.z};
+            vec3 p0_world = tv_get_vec3(vb->pos, i0);
+            vec3 p1_world = tv_get_vec3(vb->pos, i1);
+            vec3 p2_world = tv_get_vec3(vb->pos, i2);
 
             float t, u, v;
             vec3 tri_normal;
@@ -430,14 +443,14 @@ __global__ void render_kernel(TensorView<float, 3> d_img_accum,
 
         vec4 clip = vec4{ndc_x, ndc_y, -1.0f, 1.0f};
 
-        vec4 cam_h = lmmul(cam->inv_proj, clip);
-        vec3 dir_cam = normalize(vec3{ cam_h.x, cam_h.y, cam_h.z } / cam_h.w);
+        vec4 cam_h = mat4_lmmul(cam->inv_proj, clip);
+        vec3 dir_cam = normalize(vec3{cam_h.x, cam_h.y, cam_h.z} / cam_h.w);
 
         vec4 origin_cam = vec4{0, 0, 0, 1};
         vec4 dir_cam4   = vec4{dir_cam.x, dir_cam.y, dir_cam.z, 0};
 
-        vec4 origin_world4 = lmmul(cam->camera_to_world, origin_cam);
-        vec4 dir_world4    = lmmul(cam->camera_to_world, dir_cam4);
+        vec4 origin_world4 = mat4_lmmul(cam->camera_to_world, origin_cam);
+        vec4 dir_world4 = mat4_lmmul(cam->camera_to_world, dir_cam4);
 
         Ray ray = Ray {
             .origin = vec3{ origin_world4.x, origin_world4.y, origin_world4.z },
@@ -552,4 +565,64 @@ EXTERN_C void launch_clear_buffer(TensorView<float, 3> d_buf) {
 
 EXTERN_C void rng_deinit(void) {
     CHECK_CUDA(cudaFree(d_rng_state));
+}
+
+__global__ void model_to_world_kernel(TensorView<float, 2> d_vb_pos,
+                                      TensorView<float, 2> d_vb_norm,
+                                      TensorView<uint32_t, 1> d_indices,
+                                      TensorView<Mesh, 1> d_meshes) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= d_indices.shape[0]) return;
+
+    // Find which mesh this index belongs to
+    // (linear search works but is slow; better: precompute a per-index mesh_id
+    // array)
+    Mesh mesh;
+    for (int m = 0; m < d_meshes.shape[0]; ++m) {
+        uint32_t start = d_meshes.at(m).index_start;
+        uint32_t end = start + d_meshes.at(m).index_count;
+        if (idx >= start && idx < end) {
+            mesh = d_meshes.at(m);
+            break;
+        }
+    }
+
+    uint32_t vidx = d_indices.at(idx);
+
+    // Transform position
+    vec3 pos = tv_get_vec3(d_vb_pos, vidx);
+    vec4 pos_h = vec4{pos.x, pos.y, pos.z, 1.0f};
+    vec4 pos_w = mat4_lmmul(mesh.model, pos_h);
+    d_vb_pos.at(vidx, 0) = pos_w.x;
+    d_vb_pos.at(vidx, 1) = pos_w.y;
+    d_vb_pos.at(vidx, 2) = pos_w.z;
+
+    if (d_vb_norm.shape[0] > vidx) {
+        vec3 n = tv_get_vec3(d_vb_norm, vidx);
+
+        mat4 inv, normal_mat;
+        if (mat4_inverse(mesh.model, inv)) {
+            mat4_transpose(inv, normal_mat);
+
+            // apply upper-left 3×3
+            vec3 n_w = normalize(mat3_lmmul(normal_mat, n));
+            d_vb_norm.at(vidx, 0) = n_w.x;
+            d_vb_norm.at(vidx, 1) = n_w.y;
+            d_vb_norm.at(vidx, 2) = n_w.z;
+        }
+    }
+}
+
+EXTERN_C void model_to_world(TensorView<float, 2> d_vb_pos,
+                             TensorView<float, 2> d_vb_norm,
+                             TensorView<uint32_t, 1> d_indices,
+                             TensorView<Mesh, 1> d_meshes) {
+    dim3 block(256);
+    dim3 grid((d_indices.shape[0] + block.x - 1) / block.x);
+
+    model_to_world_kernel<<<grid, block>>>(d_vb_pos, d_vb_norm, d_indices,
+                                           d_meshes);
+
+    CHECK_CUDA(cudaPeekAtLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
 }
