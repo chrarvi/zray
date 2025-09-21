@@ -111,12 +111,12 @@ pub fn setup_box_scene(
     });
 
     const mat_glass_outer_id = try world.register_material(.{
-        .kind = rc.MaterialKind.Dialectric,
+        .kind = rc.MaterialKind.Dielectric,
         .albedo = .{ .x = 1.0, .y = 0.0, .z = 0.0 },
         .refractive_index = 1.5,
     });
     // const mat_glass_inner_id = try world.register_material(.{
-    //     .kind = rc.MaterialKind.Dialectric,
+    //     .kind = rc.MaterialKind.Dielectric,
     //     .albedo = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
     //     .refractive_index = 1.0,
     // });
