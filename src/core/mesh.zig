@@ -83,7 +83,7 @@ pub const MeshAtlas = struct {
         return &self.meshes.items[self.meshes.items.len - 1];
     }
 
-    pub fn get_triangle(self: *const MeshAtlas, mesh_idx: usize, tri_index: usize) ?Triangle {
+    pub fn get_mesh_triangle(self: *const MeshAtlas, mesh_idx: usize, tri_index: usize) ?Triangle {
         if (mesh_idx >= self.meshes.items.len) {
             return null;
         }
@@ -117,8 +117,37 @@ pub const MeshAtlas = struct {
             },
         };
     }
-    pub fn num_triangles(self: *const MeshAtlas, mesh_idx: usize) usize {
+
+    pub fn num_mesh_triangles(self: *const MeshAtlas, mesh_idx: usize) usize {
         std.debug.assert(mesh_idx < self.meshes.items.len);
         return self.meshes.items[mesh_idx].index_count / 3;
+    }
+
+    pub fn get_triangle(self: *const MeshAtlas, tri_index: usize) ?Triangle {
+        if (tri_index >= self.num_triangles()) return null;
+        const vi = tri_index * 3;
+
+        return .{
+            .pos = .{
+                self.vb.pos_buf.items[vi].xyz(),
+                self.vb.pos_buf.items[vi+1].xyz(),
+                self.vb.pos_buf.items[vi+2].xyz(),
+            },
+            .color = .{
+                self.vb.color_buf.items[vi],
+                self.vb.color_buf.items[vi+1],
+                self.vb.color_buf.items[vi+2],
+            },
+            .normal = .{
+                self.vb.normal_buf.items[vi].xyz(),
+                self.vb.normal_buf.items[vi+1].xyz(),
+                self.vb.normal_buf.items[vi+2].xyz(),
+            },
+        };
+
+    }
+
+    pub fn num_triangles(self: *const MeshAtlas) usize {
+        return self.indices.items.len / 3;
     }
 };

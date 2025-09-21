@@ -62,6 +62,12 @@ pub const Vec3 = extern struct {
     pub fn add(s: Vec3, o: Vec3) Vec3 {
         return Vec3.new(s.x + o.x, s.y + o.y, s.z + o.z);
     }
+    pub fn divc(s: Vec3, c: f32) Vec3 {
+        return s.mulc(1/c);
+    }
+    pub fn mulc(s: Vec3, c: f32) Vec3 {
+        return Vec3.new(s.x * c, s.y * c, s.z * c);
+    }
     pub fn min(s: Vec3, o: Vec3) Vec3 {
         return Vec3.new(
             @min(s.x, o.x),
