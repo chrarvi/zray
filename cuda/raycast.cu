@@ -1,28 +1,30 @@
-#include "stdio.h"
-#include "assert.h"
-#include "raycast.h"
-#include <cmath>
 #include <cuda_runtime.h>
-#include <ios>
-#include <math.h>
-#include "math.cuh"
-#include "tensor_view.cuh"
-
-#include <stdint.h>
-
-#include <stdio.h>
-
 #include <curand.h>
 #include <curand_kernel.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
 
-#define CHECK_CUDA(call)                                                         \
-    do {                                                                         \
-        cudaError_t err = call;                                                  \
-        if (err != cudaSuccess) {                                                \
-            fprintf(stderr, "CUDA Error: %s (error code %d) in %s at line %d\n", \
-                    cudaGetErrorString(err), err, __FILE__, __LINE__);           \
-            exit(EXIT_FAILURE);                                                  \
-        }                                                                        \
+#include <cfloat>
+#include <cmath>
+#include <cstdio>
+#include <ios>
+
+#include "assert.h"
+#include "math.cuh"
+#include "raycast.h"
+#include "stdio.h"
+#include "tensor_view.cuh"
+
+#define CHECK_CUDA(call)                                                 \
+    do {                                                                 \
+        cudaError_t err = call;                                          \
+        if (err != cudaSuccess) {                                        \
+            fprintf(stderr,                                              \
+                    "CUDA Error: %s (error code %d) in %s at line %d\n", \
+                    cudaGetErrorString(err), err, __FILE__, __LINE__);   \
+            exit(EXIT_FAILURE);                                          \
+        }                                                                \
     } while (0)
 
 typedef struct {
@@ -46,18 +48,16 @@ typedef struct {
     vec3 emission;
 } ScatterResult;
 
-
 typedef struct {
     TensorView<float, 2> pos;
     TensorView<float, 2> norm;
     TensorView<float, 2> color;
 } VertexBuffers;
 
-
 // TODO: Consider exposing this in the header and just preparing is on the zig
 // side
 typedef struct {
-    CameraData *cam;
+    CameraData* cam;
     TensorView<Sphere, 1> spheres;
     VertexBuffers vb;
     TensorView<uint32_t, 1> indices;
@@ -66,7 +66,7 @@ typedef struct {
 } Scene;
 
 __device__ inline vec3 tv_get_vec3(TensorView<float, 2> tv, size_t i) {
-    return vec3{ tv.at(i, 0), tv.at(i, 1), tv.at(i, 2) };
+    return vec3{tv.at(i, 0), tv.at(i, 1), tv.at(i, 2)};
 }
 
 __global__ void setup_rng(curandState* state, int width, int height, int seed) {
@@ -82,8 +82,8 @@ __device__ vec3 ray_at(const Ray* ray, float t) {
     return ray->origin + t * ray->dir;
 }
 
-__device__ bool sphere_hit(const Sphere *sphere, const Ray *ray, float ray_tmin,
-                           float ray_tmax, HitRecord *hit_record) {
+__device__ bool sphere_hit(const Sphere* sphere, const Ray* ray, float ray_tmin,
+                           float ray_tmax, HitRecord* hit_record) {
     const vec3 oc = sphere->center - ray->origin;
     const float a = dot(ray->dir, ray->dir);
     const float h = dot(ray->dir, oc);
@@ -108,18 +108,16 @@ __device__ bool sphere_hit(const Sphere *sphere, const Ray *ray, float ray_tmin,
 
     const vec3 outward_normal = (point - sphere->center) / sphere->radius;
     hit_record->front_face = dot(ray->dir, outward_normal) < 0.0;
-    hit_record->normal = hit_record->front_face ? outward_normal : outward_normal * -1.0f;
+    hit_record->normal =
+        hit_record->front_face ? outward_normal : outward_normal * -1.0f;
 
     return true;
 }
 
-__device__ bool triangle_hit(
-    const vec3 p1, const vec3 p2, const vec3 p3,
-    const Ray *ray,
-    float ray_tmin, float ray_tmax,
-    float* out_t, float* out_u, float* out_v,
-    vec3* out_normal, bool* out_front_face)
-{
+__device__ bool triangle_hit(const vec3 p1, const vec3 p2, const vec3 p3,
+                             const Ray* ray, float ray_tmin, float ray_tmax,
+                             float* out_t, float* out_u, float* out_v,
+                             vec3* out_normal, bool* out_front_face) {
     const float EPS = 1e-8f;
 
     vec3 e1 = p2 - p1;
@@ -148,7 +146,8 @@ __device__ bool triangle_hit(
     if (out_u) *out_u = u;
     if (out_v) *out_v = v;
     if (out_front_face) *out_front_face = front_face;
-    if (out_normal) *out_normal = front_face ? outward_normal : outward_normal * -1.0f;
+    if (out_normal)
+        *out_normal = front_face ? outward_normal : outward_normal * -1.0f;
     return true;
 }
 
@@ -163,20 +162,16 @@ __device__ bool aabb_hit(const Ray* ray, const AABB* box) {
     vec3 t_vec_far = fmaxf(t_low, t_high);
 
     float t_close = fmaxf(t_vec_close);
-    float t_far   = fminf(t_vec_far);
+    float t_far = fminf(t_vec_far);
 
     return (t_close <= t_far) && (t_far >= 0.0f);
 }
 
-__device__ bool mesh_hit(
-    const Ray* ray,
-    const VertexBuffers* vb,
-    TensorView<uint32_t, 1> indices,
-    TensorView<Mesh, 1> meshes,
-    TensorView<Material, 1> materials,
-    float ray_tmin, float ray_tmax,
-    HitRecord* hit_record)
-{
+__device__ bool mesh_hit(const Ray* ray, const VertexBuffers* vb,
+                         TensorView<uint32_t, 1> indices,
+                         TensorView<Mesh, 1> meshes,
+                         TensorView<Material, 1> materials, float ray_tmin,
+                         float ray_tmax, HitRecord* hit_record) {
     const size_t n = vb->pos.shape[0];
     if (n < 3) return false;
 
@@ -185,26 +180,19 @@ __device__ bool mesh_hit(
 
     for (size_t m = 0; m < meshes.shape[0]; ++m) {
         Mesh* mesh = &meshes.at(m);
-        // todo: skip mesh if ray does not intersect the mesh bounding box at all
-
-        AABB box = {
-            .min = {-1, -1, -1},
-            .max = {1, 1, 1},
-        };
-        if (!aabb_hit(ray, &box)) {
+        if (!aabb_hit(ray, &mesh->box)) {
             continue;
         }
 
-
         uint32_t start = mesh->index_start;
-        uint32_t end   = start + mesh->index_count;
+        uint32_t end = start + mesh->index_count;
 
         Material* material = &materials.at(mesh->material_idx);
 
-        for (size_t i = start; i + 2 < end; i+=3) {
-            uint32_t i0 = indices.at(i+0);
-            uint32_t i1 = indices.at(i+1);
-            uint32_t i2 = indices.at(i+2);
+        for (size_t i = start; i + 2 < end; i += 3) {
+            uint32_t i0 = indices.at(i + 0);
+            uint32_t i1 = indices.at(i + 1);
+            uint32_t i2 = indices.at(i + 2);
 
             vec3 p0_world = tv_get_vec3(vb->pos, i0);
             vec3 p1_world = tv_get_vec3(vb->pos, i1);
@@ -214,7 +202,8 @@ __device__ bool mesh_hit(
             vec3 tri_normal;
             bool front_face;
 
-            if (triangle_hit(p0_world, p1_world, p2_world, ray, ray_tmin, closest, &t, &u, &v, &tri_normal, &front_face)) {
+            if (triangle_hit(p0_world, p1_world, p2_world, ray, ray_tmin,
+                             closest, &t, &u, &v, &tri_normal, &front_face)) {
                 hit_anything = true;
                 closest = t;
                 vec3 point = ray_at(ray, t);
@@ -230,7 +219,7 @@ __device__ bool mesh_hit(
                 vec3 n_shade = normalize(bary_lerp(n0, n1, n2, u, v));
                 if (!front_face) n_shade = n_shade * -1;
 
-                vec3 c0{1,1,1}, c1{1,1,1}, c2{1,1,1};
+                vec3 c0{1, 1, 1}, c1{1, 1, 1}, c2{1, 1, 1};
                 if (vb->color.shape[0] >= i + 3) {
                     c0 = tv_get_vec3(vb->color, i + 0);
                     c1 = tv_get_vec3(vb->color, i + 1);
@@ -238,9 +227,9 @@ __device__ bool mesh_hit(
                 }
                 vec3 albedo = bary_lerp(c0, c1, c2, u, v);
 
-                hit_record->t          = t;
-                hit_record->point      = point;
-                hit_record->normal     = n_shade;
+                hit_record->t = t;
+                hit_record->point = point;
+                hit_record->normal = n_shade;
                 hit_record->front_face = front_face;
                 hit_record->u = u;
                 hit_record->v = v;
@@ -253,14 +242,16 @@ __device__ bool mesh_hit(
     return hit_anything;
 }
 
-
-__device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres, TensorView<Material, 1> d_materials, float ray_tmin, float ray_tmax, HitRecord* hit_record) {
+__device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres,
+                            TensorView<Material, 1> d_materials, float ray_tmin,
+                            float ray_tmax, HitRecord* hit_record) {
     bool hit = false;
     float closest_so_far = ray_tmax;
     for (size_t i = 0u; i < d_spheres.shape[0]; ++i) {
         HitRecord temp_hit = {};
         const Sphere* sphere = &d_spheres.at(i);
-        bool _hit = sphere_hit(sphere, ray, ray_tmin, closest_so_far, &temp_hit);
+        bool _hit =
+            sphere_hit(sphere, ray, ray_tmin, closest_so_far, &temp_hit);
         if (_hit) {
             hit = true;
             closest_so_far = temp_hit.t;
@@ -275,33 +266,29 @@ __device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres, Ten
     return hit;
 }
 
-__device__ vec3 sample_square(curandState *local_state) {
+__device__ vec3 sample_square(curandState* local_state) {
     float x = curand_uniform(local_state) - 0.5f;
     float y = curand_uniform(local_state) - 0.5f;
     float z = 0.0f;
     return {x, y, z};
 }
 
-__device__ ScatterResult scatter_material(
-    const Material& mat,
-    const Ray& in_ray,
-    const HitRecord& hit,
-    curandState* rng)
-{
+__device__ ScatterResult scatter_material(const Material& mat,
+                                          const Ray& in_ray,
+                                          const HitRecord& hit,
+                                          curandState* rng) {
     ScatterResult result;
     result.did_scatter = false;
-    result.attenuation = vec3{1,1,1};
-    result.emission    = mat.emit;
+    result.attenuation = vec3{1, 1, 1};
+    result.emission = mat.emit;
 
     switch (mat.kind) {
         case MAT_LAMBERTIAN: {
             vec3 scatter_dir = hit.normal + random_unit_vector(rng);
             if (near_zero(scatter_dir)) scatter_dir = hit.normal;
 
-            result.scattered_ray = Ray{
-                hit.point + 1e-4f * hit.normal,
-                scatter_dir
-            };
+            result.scattered_ray =
+                Ray{hit.point + 1e-4f * hit.normal, scatter_dir};
             result.attenuation = mat.albedo;
             result.did_scatter = true;
             break;
@@ -309,14 +296,14 @@ __device__ ScatterResult scatter_material(
 
         case MAT_METAL: {
             vec3 reflected = reflect(in_ray.dir, hit.normal);
-            reflected = normalize(reflected) + mat.fuzz * random_unit_vector(rng);
+            reflected =
+                normalize(reflected) + mat.fuzz * random_unit_vector(rng);
 
-            result.scattered_ray = Ray{
-                hit.point + 1e-4f * hit.normal,
-                reflected
-            };
+            result.scattered_ray =
+                Ray{hit.point + 1e-4f * hit.normal, reflected};
             result.attenuation = mat.albedo;
-            result.did_scatter = (dot(result.scattered_ray.dir, hit.normal) > 0.0f);
+            result.did_scatter =
+                (dot(result.scattered_ray.dir, hit.normal) > 0.0f);
             break;
         }
 
@@ -331,19 +318,19 @@ __device__ ScatterResult scatter_material(
             float w = 1.0f - u - v;
             const float edge_thickness = 0.02f;
 
-            bool is_edge = (u < edge_thickness ||
-                            v < edge_thickness ||
+            bool is_edge = (u < edge_thickness || v < edge_thickness ||
                             w < edge_thickness);
 
             result.did_scatter = false;
-            result.attenuation = is_edge ? vec3{0,0,0} : mat.albedo;
+            result.attenuation = is_edge ? vec3{0, 0, 0} : mat.albedo;
             break;
         }
         case MAT_DIELECTRIC: {
             // Attenuation is always one, glass surface absorbs nothing.
             result.attenuation = {1.0, 1.0, 1.0};
             result.did_scatter = true;
-            float ri = hit.front_face ? (1.0f / mat.refractive_index) : mat.refractive_index;
+            float ri = hit.front_face ? (1.0f / mat.refractive_index)
+                                      : mat.refractive_index;
             vec3 unit_dir = normalize(in_ray.dir);
             float cos_theta = fminf(dot(-1.0 * unit_dir, hit.normal), 1.0);
             float sin_theta = sqrtf(1.0 - cos_theta * cos_theta);
@@ -351,16 +338,15 @@ __device__ ScatterResult scatter_material(
             bool cannot_refract = ri * sin_theta > 1.0;
 
             vec3 direction;
-            if (cannot_refract || reflectance(cos_theta, ri) > curand_uniform(rng)) {
+            if (cannot_refract ||
+                reflectance(cos_theta, ri) > curand_uniform(rng)) {
                 direction = reflect(unit_dir, hit.normal);
             } else {
                 direction = refract(unit_dir, hit.normal, ri);
             }
 
-            result.scattered_ray = Ray{
-                hit.point + 1e-4f * direction,
-                direction
-            };
+            result.scattered_ray =
+                Ray{hit.point + 1e-4f * direction, direction};
             break;
         }
     }
@@ -368,13 +354,8 @@ __device__ ScatterResult scatter_material(
     return result;
 }
 
-
-__device__ vec3 ray_color(
-    const Ray& ray,
-    int max_depth,
-    const Scene *scene,
-    curandState* local_state)
-{
+__device__ vec3 ray_color(const Ray& ray, int max_depth, const Scene* scene,
+                          curandState* local_state) {
     Ray current_ray = ray;
     vec3 throughput = {1.0f, 1.0f, 1.0f};
     vec3 accum = {0.0f, 0.0f, 0.0f};
@@ -385,24 +366,27 @@ __device__ vec3 ray_color(
         float tmax = INFINITY;
 
         HitRecord sphere_hitrec;
-        if (spheres_hit(&current_ray, scene->spheres, scene->materials, 0.001f, tmax, &sphere_hitrec)) {
+        if (spheres_hit(&current_ray, scene->spheres, scene->materials, 0.001f,
+                        tmax, &sphere_hitrec)) {
             best_hit = sphere_hitrec;
             tmax = sphere_hitrec.t;
             hit_anything = true;
         }
         HitRecord mesh_hitrec;
-        if (mesh_hit(&current_ray, &scene->vb, scene->indices, scene->meshes, scene->materials, 0.001f, tmax, &mesh_hitrec)) {
+        if (mesh_hit(&current_ray, &scene->vb, scene->indices, scene->meshes,
+                     scene->materials, 0.001f, tmax, &mesh_hitrec)) {
             best_hit = mesh_hitrec;
             tmax = mesh_hitrec.t;
             hit_anything = true;
         }
 
         if (hit_anything) {
-            ScatterResult sr = scatter_material(best_hit.material, current_ray, best_hit, local_state);
+            ScatterResult sr = scatter_material(best_hit.material, current_ray,
+                                                best_hit, local_state);
 
             accum = accum + throughput * sr.emission;
             if (!sr.did_scatter) {
-                accum = accum + throughput *sr.attenuation;
+                accum = accum + throughput * sr.attenuation;
                 break;
             }
 
@@ -412,7 +396,8 @@ __device__ vec3 ray_color(
             // miss → sky
             vec3 unit_dir = normalize(current_ray.dir);
             float t = 0.5f * (unit_dir.y + 1.0f);
-            vec3 sky = (1.0f - t) * vec3{1.0f, 1.0f, 1.0f} + t * vec3{0.5f, 0.7f, 1.0f};
+            vec3 sky = (1.0f - t) * vec3{1.0f, 1.0f, 1.0f} +
+                       t * vec3{0.5f, 0.7f, 1.0f};
             accum = accum + throughput * sky;
             break;
         }
@@ -421,12 +406,9 @@ __device__ vec3 ray_color(
 }
 
 __global__ void render_kernel(TensorView<float, 3> d_img_accum,
-                              TensorView<char, 3> d_img, const CameraData *cam,
-                              Scene scene, curandState *rng_state,
-                              unsigned int frame_idx,
-                              bool temporal_averaging
-                              )
-{
+                              TensorView<char, 3> d_img, const CameraData* cam,
+                              Scene scene, curandState* rng_state,
+                              unsigned int frame_idx, bool temporal_averaging) {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x >= cam->image_width || y >= cam->image_height) return;
@@ -436,7 +418,7 @@ __global__ void render_kernel(TensorView<float, 3> d_img_accum,
 
     for (size_t sample = 0u; sample < cam->samples_per_pixel; ++sample) {
         vec3 offset = sample_square(local_state);
-        float ndc_x = ((x + offset.x) / (float)cam->image_width)  * 2.0f - 1.0f;
+        float ndc_x = ((x + offset.x) / (float)cam->image_width) * 2.0f - 1.0f;
         float ndc_y = ((y + offset.y) / (float)cam->image_height) * 2.0f - 1.0f;
 
         ndc_y = -ndc_y;
@@ -447,28 +429,24 @@ __global__ void render_kernel(TensorView<float, 3> d_img_accum,
         vec3 dir_cam = normalize(vec3{cam_h.x, cam_h.y, cam_h.z} / cam_h.w);
 
         vec4 origin_cam = vec4{0, 0, 0, 1};
-        vec4 dir_cam4   = vec4{dir_cam.x, dir_cam.y, dir_cam.z, 0};
+        vec4 dir_cam4 = vec4{dir_cam.x, dir_cam.y, dir_cam.z, 0};
 
         vec4 origin_world4 = mat4_lmmul(cam->camera_to_world, origin_cam);
         vec4 dir_world4 = mat4_lmmul(cam->camera_to_world, dir_cam4);
 
-        Ray ray = Ray {
-            .origin = vec3{ origin_world4.x, origin_world4.y, origin_world4.z },
-            .dir    = normalize({ dir_world4.x, dir_world4.y, dir_world4.z }),
+        Ray ray = Ray{
+            .origin = vec3{origin_world4.x, origin_world4.y, origin_world4.z},
+            .dir = normalize({dir_world4.x, dir_world4.y, dir_world4.z}),
         };
 
         color = color + ray_color(ray, cam->max_depth, &scene, local_state);
     }
 
-
     color = color / (float)cam->samples_per_pixel;
 
     // --- Temporal accumulation ---
-    vec3 prev = vec3{
-        d_img_accum.at(y, x, 0),
-        d_img_accum.at(y, x, 1),
-        d_img_accum.at(y, x, 2)
-    };
+    vec3 prev = vec3{d_img_accum.at(y, x, 0), d_img_accum.at(y, x, 1),
+                     d_img_accum.at(y, x, 2)};
     vec3 new_avg;
     if (temporal_averaging) {
         new_avg = (prev * frame_idx + color) / (frame_idx + 1);
@@ -486,32 +464,28 @@ __global__ void render_kernel(TensorView<float, 3> d_img_accum,
     d_img.at(y, x, 2) = (unsigned char)(255.0f * display_color.z);
 }
 
-curandState *d_rng_state;
-
+curandState* d_rng_state;
 
 EXTERN_C void rng_init(size_t image_height, size_t image_width, int seed) {
-    CHECK_CUDA(cudaMalloc(&d_rng_state, image_height * image_width * sizeof(curandState)));
+    CHECK_CUDA(cudaMalloc(&d_rng_state,
+                          image_height * image_width * sizeof(curandState)));
 
     dim3 block(32, 8);
     dim3 grid((image_width + block.x - 1) / block.x,
-                (image_height + block.y - 1) / block.y);
+              (image_height + block.y - 1) / block.y);
 
     setup_rng<<<grid, block>>>(d_rng_state, image_width, image_height, seed);
     CHECK_CUDA(cudaPeekAtLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 }
 
-EXTERN_C void launch_raycast(TensorView<float, 3> d_img_accum,
-                             TensorView<char, 3> d_img, const CameraData *cam,
-                             TensorView<Sphere, 1> d_spheres,
-                             TensorView<float, 2> d_vb_pos,
-                             TensorView<float, 2> d_vb_color,
-                             TensorView<float, 2> d_vb_norm,
-                             TensorView<uint32_t, 1> d_indices,
-                             TensorView<Mesh, 1> d_meshes,
-                             TensorView<Material, 1> d_materials,
-                             unsigned int frame_idx,
-                             bool temporal_averaging) {
+EXTERN_C void launch_raycast(
+    TensorView<float, 3> d_img_accum, TensorView<char, 3> d_img,
+    const CameraData* cam, TensorView<Sphere, 1> d_spheres,
+    TensorView<float, 2> d_vb_pos, TensorView<float, 2> d_vb_color,
+    TensorView<float, 2> d_vb_norm, TensorView<uint32_t, 1> d_indices,
+    TensorView<Mesh, 1> d_meshes, TensorView<Material, 1> d_materials,
+    unsigned int frame_idx, bool temporal_averaging) {
     // d_img: height, width 3
     // d_spheres: n_spheres
     // d_vb_pos: n_vertex, 3
@@ -522,11 +496,12 @@ EXTERN_C void launch_raycast(TensorView<float, 3> d_img_accum,
     // d_materials: n_materials
     Scene scene = Scene{
         .spheres = d_spheres,
-        .vb = VertexBuffers {
-            .pos = d_vb_pos,
-            .norm = d_vb_norm,
-            .color = d_vb_color,
-        },
+        .vb =
+            VertexBuffers{
+                .pos = d_vb_pos,
+                .norm = d_vb_norm,
+                .color = d_vb_color,
+            },
         .indices = d_indices,
         .meshes = d_meshes,
         .materials = d_materials,
@@ -534,9 +509,10 @@ EXTERN_C void launch_raycast(TensorView<float, 3> d_img_accum,
 
     dim3 block(32, 8);
     dim3 grid((cam->image_width + block.x - 1) / block.x,
-                (cam->image_height + block.y - 1) / block.y);
+              (cam->image_height + block.y - 1) / block.y);
 
-    render_kernel<<<grid, block>>>(d_img_accum, d_img, cam, scene, d_rng_state, frame_idx, temporal_averaging);
+    render_kernel<<<grid, block>>>(d_img_accum, d_img, cam, scene, d_rng_state,
+                                   frame_idx, temporal_averaging);
     CHECK_CUDA(cudaPeekAtLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 }
@@ -556,16 +532,14 @@ __global__ void clear_buffer(TensorView<float, 3> d_buf) {
 EXTERN_C void launch_clear_buffer(TensorView<float, 3> d_buf) {
     dim3 block(32, 8);
     dim3 grid((d_buf.shape[1] + block.x - 1) / block.x,
-                (d_buf.shape[0] + block.y - 1) / block.y);
+              (d_buf.shape[0] + block.y - 1) / block.y);
 
     clear_buffer<<<grid, block>>>(d_buf);
     CHECK_CUDA(cudaPeekAtLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 }
 
-EXTERN_C void rng_deinit(void) {
-    CHECK_CUDA(cudaFree(d_rng_state));
-}
+EXTERN_C void rng_deinit(void) { CHECK_CUDA(cudaFree(d_rng_state)); }
 
 __global__ void model_to_world_kernel(TensorView<float, 2> d_vb_pos,
                                       TensorView<float, 2> d_vb_norm,
@@ -624,5 +598,130 @@ EXTERN_C void model_to_world(TensorView<float, 2> d_vb_pos,
                                            d_meshes);
 
     CHECK_CUDA(cudaPeekAtLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+}
+
+/// AABB stuff
+__device__ AABB aabb_init() {
+    return {.min = {FLT_MAX, FLT_MAX, FLT_MAX},
+            .max = {-FLT_MAX, -FLT_MAX, -FLT_MAX}};
+}
+
+__device__ bool aabb_valid(const AABB& b) {
+    return b.min.x <= b.max.x &&
+           b.min.y <= b.max.y &&
+           b.min.z <= b.max.z;
+}
+
+__device__ void aabb_extend(AABB& box, vec3 p) {
+    box.min = fminf(box.min, p);
+    box.max = fmaxf(box.max, p);
+}
+
+__device__ void aabb_merge(AABB& box, const AABB& other) {
+    if (!aabb_valid(other)) return;
+    aabb_extend(box, other.min);
+    aabb_extend(box, other.max);
+}
+
+__global__ void compute_aabb_kernel_stage1(
+    TensorView<float, 2> d_vb_pos,
+    TensorView<uint32_t, 1> d_indices,
+    TensorView<Mesh, 1> d_meshes,
+    TensorView<AABB, 1> d_partial_boxes)
+{
+    unsigned int block_id   = blockIdx.x;
+    unsigned int thread_id  = threadIdx.x;
+    unsigned int global_tid = block_id * blockDim.x + thread_id;
+    unsigned int stride     = blockDim.x * gridDim.x;
+
+    extern __shared__ AABB sdata[]; // one per thread for local reductions
+
+    for (unsigned int mesh_idx = 0; mesh_idx < d_meshes.shape[0]; ++mesh_idx) {
+        const Mesh& mesh = d_meshes.at(mesh_idx);
+
+        // start local AABB
+        AABB local_box = aabb_init();
+
+        for (unsigned int i = global_tid; i < mesh.index_count; i += stride) {
+            uint32_t vi = d_indices.at(mesh.index_start + i);
+            vec3 p = tv_get_vec3(d_vb_pos, vi);
+            aabb_extend(local_box, p);
+        }
+
+        sdata[thread_id] = local_box;
+        __syncthreads();
+
+        // intra-block reduction
+        for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+            if (thread_id < s) {
+                aabb_merge(sdata[thread_id], sdata[thread_id + s]);
+            }
+            __syncthreads();
+        }
+
+        // thread 0 writes final block AABB for this mesh
+        if (thread_id == 0) {
+            d_partial_boxes.at(mesh_idx * gridDim.x + block_id) = sdata[0];
+        }
+        __syncthreads(); // ensure clean slate before next mesh
+    }
+}
+
+__global__ void compute_aabb_kernel_stage2(
+    TensorView<AABB, 1> d_partial_boxes,
+    TensorView<Mesh, 1> d_meshes,
+    unsigned int num_blocks)
+{
+    unsigned int mesh_idx = blockIdx.x;
+    unsigned int tid = threadIdx.x;
+
+    extern __shared__ AABB sdata[];
+
+    // load one partial box per thread (if available)
+    if (tid < num_blocks) {
+        sdata[tid] = d_partial_boxes.at(mesh_idx * num_blocks + tid);
+    } else {
+        sdata[tid] = aabb_init();
+    }
+    __syncthreads();
+
+    // reduce
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            aabb_merge(sdata[tid], sdata[tid + s]);
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        d_meshes.at(mesh_idx).box = sdata[0];
+    }
+}
+
+/// Parallel reduction of mesh bounding boxes.
+EXTERN_C void compute_aabb(
+    TensorView<float, 2> d_vb_pos,
+    TensorView<uint32_t, 1> d_indices,
+    TensorView<Mesh, 1> d_meshes,
+    TensorView<AABB, 1> d_partial_aabb)
+{
+    unsigned int num_vertices = d_vb_pos.shape[0];
+    unsigned int threads = 256;
+    unsigned int blocks  = (num_vertices + threads - 1) / threads;
+
+    // stage 1: one AABB per block per mesh
+    size_t shmem_stage1 = threads * sizeof(AABB);
+    compute_aabb_kernel_stage1<<<blocks, threads, shmem_stage1>>>(
+        d_vb_pos, d_indices, d_meshes, d_partial_aabb);
+    CHECK_CUDA(cudaPeekAtLastError());
+
+    // stage 2: reduce block AABBs per mesh
+    unsigned int threads_stage2 = 128;
+    size_t shmem_stage2 = threads_stage2 * sizeof(AABB);
+    compute_aabb_kernel_stage2<<<d_meshes.shape[0], threads_stage2, shmem_stage2>>>(
+        d_partial_aabb, d_meshes, blocks);
+    CHECK_CUDA(cudaPeekAtLastError());
+
     CHECK_CUDA(cudaDeviceSynchronize());
 }

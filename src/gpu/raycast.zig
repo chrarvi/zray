@@ -40,6 +40,13 @@ pub extern fn model_to_world(
     d_meshes: cu.TensorView(rc.Mesh, 1),
 ) void;
 
+pub extern fn compute_aabb(
+    d_vb_pos: cu.TensorView(f32, 2),
+    d_indices: cu.TensorView(u32, 1),
+    d_meshes: cu.TensorView(rc.Mesh, 1),
+    d_partial_aabb: cu.TensorView(rc.AABB, 1),
+) void;
+
 pub extern fn launch_clear_buffer(
     d_img_accum: cu.TensorView(f32, 3),
 ) void;

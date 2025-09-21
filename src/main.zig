@@ -20,6 +20,69 @@ const RENDERING_FRAMERATE: f32 = 30.0;
 
 const NUM_SPHERES = 4;
 
+pub fn setup_teapot_scene(
+    world: *core.World,
+    scene_scale: al.Vec3,
+) !void {
+    const mat_red_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.8, .y = 0.0, .z = 0.0 },
+    });
+    const mat_gray_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.5, .y = 0.5, .z = 0.5 },
+    });
+    const mat_green_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.0, .y = 0.8, .z = 0.5 },
+    });
+    const mat_light_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Emissive,
+        .emit = .{ .x = 0.95 * 10.0, .y = 0.7 * 10.0, .z = 0.7 * 10.0 }, // yellowish
+    });
+
+    const base_cube = "assets/meshes/cube.txt";
+    const base_teapot = "assets/meshes/teapot.txt";
+
+    const s = scene_scale;
+
+    const instances = [_]struct {
+        name: []const u8,
+        scale: al.Vec3,
+        translate: al.Vec3,
+        mat: c_uint,
+    }{
+        // props
+        .{ .name = base_teapot, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.0 * s.x, -0.5 * s.y, 0.0 * s.z), .mat = mat_gray_id },
+
+        // walls
+        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(-s.x, 0.0, 0.0), .mat = mat_red_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(s.x, 0.0, 0.0), .mat = mat_green_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, -s.y, 0.0), .mat = mat_gray_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, s.y, 0.0), .mat = mat_gray_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, -s.z), .mat = mat_gray_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, s.z), .mat = mat_gray_id },
+
+        // light
+        .{ .name = base_cube, .scale = al.Vec3.new(0.2 * s.x, 0.1 * s.y, 0.2 * s.z), .translate = al.Vec3.new(0.0, 0.9 * s.y, 0.0), .mat = mat_light_id },
+
+    };
+
+    for (instances) |desc| {
+        var mesh = try world.mesh_atlas.parse_mesh_from_file(desc.name);
+        _ = al.mat4_scale(&mesh.model, desc.scale);
+        _ = al.mat4_translate(&mesh.model, desc.translate);
+        mesh.material_idx = desc.mat;
+    }
+
+    // mock sphere
+    try world.spheres.append(.{
+        .center = .{ .x = 1000.0 * s.x, .y = 0.0 * s.y, .z = 0.0 * s.z },
+        .radius = 0.1,
+        .material_idx = mat_gray_id,
+    });
+}
+
 pub fn setup_box_scene(
     world: *core.World,
     scene_scale: al.Vec3, // now a vector
@@ -109,7 +172,7 @@ pub fn main() !void {
     var gpa = std.heap.page_allocator;
 
     const aspect_ratio = 16.0 / 9.0;
-    const image_width: u32 = 1080;
+    const image_width: u32 = 256;
     const image_height: u32 = @intFromFloat(@max(@divFloor(@as(f32, @floatFromInt(image_width)), aspect_ratio), 1));
 
     // double-buffering
@@ -138,6 +201,7 @@ pub fn main() !void {
     var world = try core.World.init(gpa);
     defer world.deinit();
     try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
+    // try setup_teapot_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
 
     const n_spheres = world.spheres.items.len;
     const n_vertex = world.mesh_atlas.vb.pos_buf.items.len;
@@ -185,8 +249,8 @@ pub fn main() !void {
     rc.rng_init(shared.cam.image_height, shared.cam.image_width, RNG_SEED);
     defer rc.rng_deinit();
 
-    var bvh = core.BoundingVolumeHierarchy.init();
-    bvh.build(&shared.world.mesh_atlas);
+    // var bvh = core.BoundingVolumeHierarchy.init();
+    // bvh.build(&shared.world.mesh_atlas);
     var simulator = sim.Simulator.init(SIMULATION_FRAMERATE, &shared);
     try simulator.start();
 

@@ -29,29 +29,21 @@ pub const MeshAtlas = struct {
     }
 
     pub fn parse_mesh_from_file(self: *MeshAtlas, filename: []const u8) !*rc.Mesh {
-        const file = try std.fs.cwd().openFile(
-            filename,
-            .{},
-        );
+        const file = try std.fs.cwd().openFile(filename, .{});
         defer file.close();
-
         var reader = file.reader();
 
-        var tris_buf = try std.BoundedArray(u8, 32).init(32);
-        const num_tris: usize = try std.fmt.parseInt(usize, try reader.readUntilDelimiter(&tris_buf.buffer, '\n'), 10);
+        var line_buf: [256]u8 = undefined;
 
-        // TODO: use scratch arena here
-        var bytes = try std.BoundedArray(u8, 1000 * 1024).init(1000 * 1024);
-        _ = try reader.readAll(&bytes.buffer);
-
-        var lines_iter = std.mem.splitScalar(u8, &bytes.buffer, '\n');
+        const first_line = (try reader.readUntilDelimiterOrEof(&line_buf, '\n')).?;
+        const num_tris: usize = try std.fmt.parseInt(usize, first_line, 10);
 
         const vertex_start = self.vb.pos_buf.items.len;
         const index_start = self.indices.items.len;
 
         for (0..num_tris) |t_idx| {
             for (0..3) |v_idx| {
-                const pos_line = lines_iter.next().?;
+                const pos_line = (try reader.readUntilDelimiterOrEof(&line_buf, '\n')).?;
                 var pos_iter = std.mem.splitScalar(u8, pos_line, ' ');
 
                 const vert = al.Vec4.new(
@@ -60,7 +52,8 @@ pub const MeshAtlas = struct {
                     try std.fmt.parseFloat(f32, pos_iter.next().?),
                     1.0,
                 );
-                const norm_line = lines_iter.next().?;
+
+                const norm_line = (try reader.readUntilDelimiterOrEof(&line_buf, '\n')).?;
                 var norm_iter = std.mem.splitScalar(u8, norm_line, ' ');
 
                 const normal = al.Vec4.new(
@@ -70,12 +63,13 @@ pub const MeshAtlas = struct {
                     0.0,
                 );
 
-                const col = al.Vec4.new( 1.0, 1.0, 1.0, 1.0 );
+                const col = al.Vec4.new(1.0, 1.0, 1.0, 1.0);
 
                 try self.vb.push_vertex(vert, col, normal);
                 try self.indices.append(@as(u32, @intCast(vertex_start + t_idx * 3 + v_idx)));
             }
-            _ = lines_iter.next();
+
+            _ = try reader.readUntilDelimiterOrEof(&line_buf, '\n');
         }
 
         const mesh = rc.Mesh{
