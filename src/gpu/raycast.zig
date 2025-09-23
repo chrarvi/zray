@@ -26,7 +26,7 @@ pub extern fn launch_raycast(
     d_spheres: cu.TensorView(Sphere, 1),
     d_vb_pos: cu.TensorView(f32, 2),
     d_vb_color: cu.TensorView(f32, 2),
-    d_vb_normal: cu.TensorView(f32, 2),
+    d_vb_norm: cu.TensorView(f32, 2),
     d_indices: cu.TensorView(u32, 1),
     d_meshes: cu.TensorView(Mesh, 1),
     d_materials: cu.TensorView(Material, 1),

@@ -3,13 +3,14 @@ const std = @import("std");
 // FFI
 const cudaSuccess: c_int = 0;
 
+pub extern fn cudaGetErrorString(err: c_int) ?*const u8;
+
 pub fn checkCuda(ret: c_int) !void {
-    if (ret == 0) {
-        return;
-    } else {
-        std.debug.print("Unknown cuda error caught {}\n", .{ret});
-        return error.cudaUnknownError;
-    }
+    if (ret == 0) return;
+
+    const msg_ptr: *const u8 = cudaGetErrorString(ret) orelse @as(*const u8, @ptrCast("Unknown CUDA error"));
+    std.debug.print("CUDA error {}: {}\n", .{ret, msg_ptr});
+    return error.cudaUnknownError;
 }
 
 pub const cudaMemcpyHostToDevice: c_int = 1;
@@ -91,7 +92,7 @@ pub fn CudaBuffer(comptime ValueT: type) type {
             var raw: ?*anyopaque = null;
             try checkCuda(cudaMalloc(&raw, size_bytes));
 
-            buf.dev_ptr = @as([*c]ValueT, @ptrCast(@alignCast(raw.?)));
+            buf.dev_ptr = @ptrCast(@alignCast(raw.?));
 
             return buf;
         }

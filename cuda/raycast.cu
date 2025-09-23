@@ -63,7 +63,8 @@ typedef struct {
     TensorView<uint32_t, 1> indices;
     TensorView<Mesh, 1> meshes;
     TensorView<Material, 1> materials;
-    TensorView<BVHNode, 1> bvh;
+    TensorView<BVHNode, 1> bvh_nodes;
+    TensorView<uint32_t, 1> bvh_prim_indices;
 } Scene;
 
 __device__ inline vec3 tv_get_vec3(TensorView<float, 2> tv, size_t i) {
@@ -115,10 +116,9 @@ __device__ bool sphere_hit(const Sphere* sphere, const Ray* ray, float ray_tmin,
     return true;
 }
 
-__device__ bool triangle_hit(const vec3 p1, const vec3 p2, const vec3 p3,
-                             const Ray* ray, float ray_tmin, float ray_tmax,
-                             float* out_t, float* out_u, float* out_v,
-                             vec3* out_normal, bool* out_front_face) {
+__device__ bool ray_triangle_hit(const vec3 p1, const vec3 p2, const vec3 p3,
+                                 const Ray* ray, float ray_tmin, float ray_tmax,
+                                 HitRecord* out) {
     const float EPS = 1e-8f;
 
     vec3 e1 = p2 - p1;
@@ -143,17 +143,17 @@ __device__ bool triangle_hit(const vec3 p1, const vec3 p2, const vec3 p3,
     vec3 outward_normal = normalize(cross(e1, e2));
     bool front_face = dot(ray->dir, outward_normal) < 0.0f;
 
-    if (out_t) *out_t = t;
-    if (out_u) *out_u = u;
-    if (out_v) *out_v = v;
-    if (out_front_face) *out_front_face = front_face;
-    if (out_normal)
-        *out_normal = front_face ? outward_normal : outward_normal * -1.0f;
+    out->t = t;
+    out->u = u;
+    out->v = v;
+    out->front_face = front_face;
+    out->normal = front_face ? outward_normal : outward_normal * -1.0f;
+    out->point = ray_at(ray, t);
     return true;
 }
 
 // SLAB aabb intersection test
-__device__ bool aabb_hit(const Ray* ray, const AABB* box) {
+__device__ bool ray_aabb_hit(const Ray* ray, const AABB* box) {
     vec3 recip_dir = 1.0f / ray->dir;
 
     vec3 t_low = (box->min - ray->origin) * recip_dir;
@@ -168,6 +168,63 @@ __device__ bool aabb_hit(const Ray* ray, const AABB* box) {
     return (t_close <= t_far) && (t_far >= 0.0f);
 }
 
+__device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
+                            TensorView<uint32_t, 1> bvh_prim_indices,
+                            Ray const* ray, VertexBuffers const* vb,
+                            TensorView<uint32_t, 1> indices, float ray_tmin,
+                            float ray_tmax, HitRecord* out) {
+    float t_closest = ray_tmax;
+
+    const size_t MAX_BVH_DEPTH = 64;  // todo get from bvh builder
+    size_t node_stack[MAX_BVH_DEPTH];
+    size_t node_stack_count = 0;
+
+
+    node_stack[node_stack_count++] = 0;
+    bool hit_anything = false;
+
+    while (node_stack_count > 0) {
+        size_t node_idx = node_stack[--node_stack_count];
+        BVHNode const* node = &bvh_nodes.at(node_idx);
+        if (!ray_aabb_hit(ray, &node->box)) {
+            continue;
+        }
+
+        if (node->prims_count > 0) {
+            for (int tidx = node->prims_offset; tidx < node->prims_offset + node->prims_count; ++tidx) {
+                uint32_t tri_index = bvh_prim_indices.at(tidx);
+                uint32_t i0 = indices.at(tri_index * 3 + 0);
+                uint32_t i1 = indices.at(tri_index * 3 + 1);
+                uint32_t i2 = indices.at(tri_index * 3 + 2);
+                vec3 p1_world = tv_get_vec3(vb->pos, i0);
+                vec3 p2_world = tv_get_vec3(vb->pos, i1);
+                vec3 p3_world = tv_get_vec3(vb->pos, i2);
+
+                HitRecord tris_hit = {};
+                if (ray_triangle_hit(p1_world, p2_world, p3_world, ray,
+                                     ray_tmin, t_closest, &tris_hit)) {
+                    hit_anything = true;
+                    t_closest = tris_hit.t;
+
+                    vec3 n_shade = tris_hit.normal;
+                    if (!tris_hit.front_face) n_shade = n_shade * -1;
+
+                    out->t = tris_hit.t;
+                    out->point = tris_hit.point;
+                    out->normal = n_shade;
+                    out->front_face = tris_hit.front_face;
+                    out->u = tris_hit.u;
+                    out->v = tris_hit.v;
+                }
+            }
+        } else {
+            node_stack[node_stack_count++] = node->right_idx;
+            node_stack[node_stack_count++] = node->left_idx;
+        }
+    }
+    return hit_anything;
+}
+
 __device__ bool mesh_hit(const Ray* ray, const VertexBuffers* vb,
                          TensorView<uint32_t, 1> indices,
                          TensorView<Mesh, 1> meshes,
@@ -177,11 +234,11 @@ __device__ bool mesh_hit(const Ray* ray, const VertexBuffers* vb,
     if (n < 3) return false;
 
     bool hit_anything = false;
-    float closest = ray_tmax;
+    float t_closest = ray_tmax;
 
     for (size_t m = 0; m < meshes.shape[0]; ++m) {
         Mesh* mesh = &meshes.at(m);
-        if (!aabb_hit(ray, &mesh->box)) {
+        if (!ray_aabb_hit(ray, &mesh->box)) {
             continue;
         }
 
@@ -199,42 +256,21 @@ __device__ bool mesh_hit(const Ray* ray, const VertexBuffers* vb,
             vec3 p1_world = tv_get_vec3(vb->pos, i1);
             vec3 p2_world = tv_get_vec3(vb->pos, i2);
 
-            float t, u, v;
-            vec3 tri_normal;
-            bool front_face;
-
-            if (triangle_hit(p0_world, p1_world, p2_world, ray, ray_tmin,
-                             closest, &t, &u, &v, &tri_normal, &front_face)) {
+            HitRecord tris_hit = {};
+            if (ray_triangle_hit(p0_world, p1_world, p2_world, ray, ray_tmin,
+                                 t_closest, &tris_hit)) {
                 hit_anything = true;
-                closest = t;
-                vec3 point = ray_at(ray, t);
+                t_closest = tris_hit.t;
 
-                vec3 n0 = tri_normal;
-                vec3 n1 = tri_normal;
-                vec3 n2 = tri_normal;
-                if (vb->norm.shape[0] >= max(i0, max(i1, i2))) {
-                    n0 = normalize(tv_get_vec3(vb->norm, i + 0));
-                    n1 = normalize(tv_get_vec3(vb->norm, i + 1));
-                    n2 = normalize(tv_get_vec3(vb->norm, i + 2));
-                }
-                vec3 n_shade = normalize(bary_lerp(n0, n1, n2, u, v));
-                if (!front_face) n_shade = n_shade * -1;
+                vec3 n_shade = tris_hit.normal;
+                if (!tris_hit.front_face) n_shade = n_shade * -1;
 
-                vec3 c0{1, 1, 1}, c1{1, 1, 1}, c2{1, 1, 1};
-                if (vb->color.shape[0] >= i + 3) {
-                    c0 = tv_get_vec3(vb->color, i + 0);
-                    c1 = tv_get_vec3(vb->color, i + 1);
-                    c2 = tv_get_vec3(vb->color, i + 2);
-                }
-                vec3 albedo = bary_lerp(c0, c1, c2, u, v);
-
-                hit_record->t = t;
-                hit_record->point = point;
+                hit_record->t = tris_hit.t;
+                hit_record->point = tris_hit.point;
                 hit_record->normal = n_shade;
-                hit_record->front_face = front_face;
-                hit_record->u = u;
-                hit_record->v = v;
-
+                hit_record->front_face = tris_hit.front_face;
+                hit_record->u = tris_hit.u;
+                hit_record->v = tris_hit.v;
                 hit_record->material = *material;
             }
         }
@@ -355,7 +391,7 @@ __device__ ScatterResult scatter_material(const Material& mat,
     return result;
 }
 
-__device__ vec3 ray_color(const Ray& ray, int max_depth, const Scene* scene,
+__device__ vec3 ray_color(const Ray& ray, int max_depth, Scene* scene,
                           curandState* local_state) {
     Ray current_ray = ray;
     vec3 throughput = {1.0f, 1.0f, 1.0f};
@@ -373,11 +409,21 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, const Scene* scene,
             tmax = sphere_hitrec.t;
             hit_anything = true;
         }
-        HitRecord mesh_hitrec;
-        if (mesh_hit(&current_ray, &scene->vb, scene->indices, scene->meshes,
-                     scene->materials, 0.001f, tmax, &mesh_hitrec)) {
-            best_hit = mesh_hitrec;
-            tmax = mesh_hitrec.t;
+
+        // HitRecord mesh_hitrec;
+        // if (mesh_hit(&current_ray, &scene->vb, scene->indices, scene->meshes,
+        //              scene->materials, 0.001f, tmax, &mesh_hitrec)) {
+        //     best_hit = mesh_hitrec;
+        //     tmax = mesh_hitrec.t;
+        //     hit_anything = true;
+        // }
+
+        HitRecord bvh_hitrec;
+        if (ray_bvh_hit(scene->bvh_nodes, scene->bvh_prim_indices, &current_ray, &scene->vb,
+                        scene->indices, 0.001f, tmax, &bvh_hitrec)) {
+            bvh_hitrec.material = scene->materials.at(0);
+            best_hit = bvh_hitrec;
+            tmax = bvh_hitrec.t;
             hit_anything = true;
         }
 
@@ -394,7 +440,6 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, const Scene* scene,
             throughput = throughput * sr.attenuation;
             current_ray = sr.scattered_ray;
         } else {
-            // miss → sky
             vec3 unit_dir = normalize(current_ray.dir);
             float t = 0.5f * (unit_dir.y + 1.0f);
             vec3 sky = (1.0f - t) * vec3{1.0f, 1.0f, 1.0f} +
@@ -486,7 +531,7 @@ EXTERN_C void launch_raycast(
     TensorView<float, 2> d_vb_pos, TensorView<float, 2> d_vb_color,
     TensorView<float, 2> d_vb_norm, TensorView<uint32_t, 1> d_indices,
     TensorView<Mesh, 1> d_meshes, TensorView<Material, 1> d_materials,
-    TensorView<BVHNode, 1> d_bvh, unsigned int frame_idx,
+    TensorView<BVHNode, 1> d_bvh_nodes, TensorView<uint32_t, 1> d_bvh_prim_indices, unsigned int frame_idx,
     bool temporal_averaging) {
     // d_img: height, width 3
     // d_spheres: n_spheres
@@ -507,7 +552,8 @@ EXTERN_C void launch_raycast(
         .indices = d_indices,
         .meshes = d_meshes,
         .materials = d_materials,
-        .bvh = d_bvh,
+        .bvh_nodes = d_bvh_nodes,
+        .bvh_prim_indices = d_bvh_prim_indices,
     };
 
     dim3 block(32, 8);

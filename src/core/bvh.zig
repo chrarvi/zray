@@ -110,6 +110,7 @@ pub const BVHBuilder = struct {
             if (centroid.get(axis) < split_pos) {
                 i += 1;
             } else {
+                if (j == 0) break;
                 const tmp = self.prim_indices.items[i];
                 self.prim_indices.items[i] = self.prim_indices.items[j];
                 self.prim_indices.items[j] = tmp;

@@ -15,7 +15,7 @@ const RNG_SEED: i32 = 1234;
 const AtomicUsize = std.atomic.Value(usize);
 const AtomicBool = std.atomic.Value(bool);
 
-const SIMULATION_FRAMERATE: f32 = 10.0;
+const SIMULATION_FRAMERATE: f32 = 60.0;
 const RENDERING_FRAMERATE: f32 = 30.0;
 
 const NUM_SPHERES = 4;
@@ -190,7 +190,7 @@ pub fn main() !void {
     var gpa = std.heap.page_allocator;
 
     const aspect_ratio = 16.0 / 9.0;
-    const image_width: u32 = 256;
+    const image_width: u32 = 1080;
     const image_height: u32 = @intFromFloat(@max(@divFloor(@as(f32, @floatFromInt(image_width)), aspect_ratio), 1));
 
     // double-buffering
@@ -225,7 +225,7 @@ pub fn main() !void {
     // var bvh = core.BVHBuilder.init(gpa);
     // try bvh.build(&world.mesh_atlas, 10);
     // try setup_bvh_scene(&world, &bvh);
-    const bvh_max_depth = 10;
+    const bvh_max_depth = 16;
     try world.bvh.build(&world.mesh_atlas, bvh_max_depth);
 
     const n_spheres = world.spheres.items.len;
@@ -256,6 +256,7 @@ pub fn main() !void {
         .frame_buffer_dev_accum = try cu.CudaBuffer(f32).init(buf_size),
         .ready_idx = AtomicUsize.init(0),
         .running = AtomicBool.init(true),
+        .bvh_max_depth = bvh_max_depth,
         .cam = rc.CameraData{
             .image_width = image_width,
             .image_height = image_height,

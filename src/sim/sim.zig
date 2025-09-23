@@ -12,6 +12,7 @@ pub const SimSharedState = struct {
     frame_buffer_dev_accum: gpu.cuda.CudaBuffer(f32),
     ready_idx: AtomicUsize, // which buffer is ready for display
     running: AtomicBool, // shutdown flag
+    bvh_max_depth: u32,
     cam: rc.CameraData,
     world: *core.World,
     world_dev: *gpu.DeviceWorld,
@@ -51,12 +52,12 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
     var last = try std.time.Instant.now();
 
     const wd = shared.world_dev;
-    rc.model_to_world(
-            try wd.vb.pos_buf.view(2, .{ wd.vb.pos_buf.len / 4, 4 }),
-            try wd.vb.normal_buf.view(2, .{ wd.vb.normal_buf.len / 4, 4 }),
-            try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
-            try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
-    );
+    // rc.model_to_world(
+    //         try wd.vb.pos_buf.view(2, .{ wd.vb.pos_buf.len / 4, 4 }),
+    //         try wd.vb.normal_buf.view(2, .{ wd.vb.normal_buf.len / 4, 4 }),
+    //         try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
+    //         try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
+    // );
     while (shared.running.load(.acquire)) {
         const now = try std.time.Instant.now();
         const since_f32 = @as(f32, @floatFromInt(now.since(last)));
@@ -70,12 +71,13 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
         const current_ready = shared.ready_idx.load(.acquire);
         const write_idx: usize = 1 - current_ready;
 
-        rc.compute_aabb(
-            try wd.vb.pos_buf.view(2, .{ wd.vb.pos_buf.len / 4, 4 }),
-            try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
-            try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
-            try wd.partial_aabb.view(1, .{shared.world.mesh_atlas.meshes.items.len * 128}),
-        );
+        // rc.compute_aabb(
+        //     try wd.vb.pos_buf.view(2, .{ wd.vb.pos_buf.len / 4, 4 }),
+        //     try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
+        //     try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
+        //     try wd.partial_aabb.view(1, .{shared.world.mesh_atlas.meshes.items.len * 128}),
+        // );
+
 
         rc.launch_raycast(
             try shared.frame_buffer_dev_accum.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }),
@@ -88,7 +90,7 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
             try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
             try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
             try wd.materials.view(1, .{shared.world.materials.items.len}),
-            try wd.bvh_nodes.view(1, .{std.math.pow(u32, 2, 10 + 1) - 1}),
+            try wd.bvh_nodes.view(1, .{std.math.pow(u32, 2, shared.bvh_max_depth + 1) - 1}),
             try wd.bvh_prim_indices.view(1, .{shared.world.bvh.prim_indices.items.len}),
             shared.frame_idx,
             shared.cam.temporal_averaging,

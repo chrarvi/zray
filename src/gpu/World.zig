@@ -49,16 +49,18 @@ pub fn deinit(self: *DeviceWorld) void {
 pub fn bvh_to_device(self: *DeviceWorld, host: *const HostBVH, alloc: std.mem.Allocator) !void {
     var temp_buffer = try std.ArrayList(rc.BVHNode).initCapacity(alloc, host.nodes.items.len);
     defer temp_buffer.deinit();
+
     for (host.nodes.items) |node| {
         var n = try temp_buffer.addOne();
         n.box = rc.AABB {
-                .min = .{.x=node.box.min.x, .y=node.box.min.y, .z=node.box.min.z},
-                .max = .{.x=node.box.max.x, .y=node.box.max.y, .z=node.box.max.z},
+            .min = .{ .x=node.box.min.x, .y=node.box.min.y, .z=node.box.min.z },
+            .max = .{ .x=node.box.max.x, .y=node.box.max.y, .z=node.box.max.z },
         };
-        n.prims_count = @as(c_uint, @intCast(node.prims_count));
-        n.prims_offset = @as(c_uint, @intCast(node.prims_offset));
+
         n.left_idx = @as(c_int, @intCast(node.left_idx));
         n.right_idx = @as(c_int, @intCast(node.right_idx));
+        n.prims_count = @as(c_uint, @intCast(node.prims_count));
+        n.prims_offset = @as(c_uint, @intCast(node.prims_offset));
     }
 
     try self.bvh_nodes.fromHost(temp_buffer.items);
