@@ -15,8 +15,8 @@ const RNG_SEED: i32 = 1234;
 const AtomicUsize = std.atomic.Value(usize);
 const AtomicBool = std.atomic.Value(bool);
 
-const SIMULATION_FRAMERATE: f32 = 15.0;
-const RENDERING_FRAMERATE: f32 = 30.0;
+const SIMULATION_FRAMERATE: f32 = 144.0;
+const RENDERING_FRAMERATE: f32 = 144.0;
 
 const NUM_SPHERES = 4;
 
@@ -221,10 +221,7 @@ pub fn main() !void {
     try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
     // try setup_teapot_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
 
-    // var bvh = core.BVHBuilder.init(gpa);
-    // try bvh.build(&world.mesh_atlas, 10);
-    // try setup_bvh_scene(&world, &bvh);
-    const bvh_max_depth = 8;
+    const bvh_max_depth = 16;
     try world.bvh.build(&world.mesh_atlas, bvh_max_depth);
 
     const n_spheres = world.spheres.items.len;
@@ -263,7 +260,7 @@ pub fn main() !void {
             .focal_length = 1.0,
             .samples_per_pixel = 8,
             .temporal_averaging = false,
-            .max_depth = 2,
+            .max_depth = 8,
             .camera_to_world = camera.camera_to_world(),
             .inv_proj = camera.inv_proj,
         },

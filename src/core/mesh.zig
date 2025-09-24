@@ -126,33 +126,38 @@ pub fn get_mesh_triangle(self: *const MeshAtlas, mesh_idx: usize, tri_index: usi
         return self.meshes.items[mesh_idx].index_count / 3;
     }
 
-pub fn get_triangle(self: *const MeshAtlas, tri_index: usize) ?Triangle {
-    if (tri_index >= self.num_triangles()) return null;
-    const vi = tri_index * 3;
+    pub fn get_triangle(self: *const MeshAtlas, tri_index: usize) ?Triangle {
+        if (tri_index >= self.num_triangles()) return null;
+        const base = tri_index * 3;
 
-    const mesh_id = self.mesh_ids.items[vi];
-    if (mesh_id >= @as(u32, @intCast(self.meshes.items.len))) return null;
-    const mesh = &self.meshes.items[mesh_id];
-    const model = mesh.model;
+        const idx_1 = self.indices.items[base];
+        const idx_2 = self.indices.items[base + 1];
+        const idx_3 = self.indices.items[base + 2];
 
-    return .{
-        .pos = .{
-            al.transform_pos(model, self.vb.pos_buf.items[vi].xyz()),
-            al.transform_pos(model, self.vb.pos_buf.items[vi + 1].xyz()),
-            al.transform_pos(model, self.vb.pos_buf.items[vi + 2].xyz()),
-        },
-        .color = .{
-            self.vb.color_buf.items[vi],
-            self.vb.color_buf.items[vi + 1],
-            self.vb.color_buf.items[vi + 2],
-        },
-        .normal = .{
-            al.transform_normal(model, self.vb.normal_buf.items[vi].xyz()),
-            al.transform_normal(model, self.vb.normal_buf.items[vi + 1].xyz()),
-            al.transform_normal(model, self.vb.normal_buf.items[vi + 2].xyz()),
-        },
-    };
-}
+        const mesh_id = self.mesh_ids.items[base];
+
+        if (mesh_id >= @as(u32, @intCast(self.meshes.items.len))) return null;
+        const mesh = &self.meshes.items[mesh_id];
+        const model = mesh.model;
+
+        return .{
+            .pos = .{
+                al.transform_pos(model, self.vb.pos_buf.items[idx_1].xyz()),
+                al.transform_pos(model, self.vb.pos_buf.items[idx_2].xyz()),
+                al.transform_pos(model, self.vb.pos_buf.items[idx_3].xyz()),
+            },
+            .color = .{
+                self.vb.color_buf.items[idx_1],
+                self.vb.color_buf.items[idx_2],
+                self.vb.color_buf.items[idx_3],
+            },
+            .normal = .{
+                al.transform_normal(model, self.vb.normal_buf.items[idx_1].xyz()),
+                al.transform_normal(model, self.vb.normal_buf.items[idx_2].xyz()),
+                al.transform_normal(model, self.vb.normal_buf.items[idx_3].xyz()),
+            },
+        };
+    }
 
     pub fn num_triangles(self: *const MeshAtlas) usize {
         return self.indices.items.len / 3;

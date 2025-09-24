@@ -40,7 +40,7 @@ typedef struct {
     float t;
     bool front_face;
     float u, v;
-    uint32_t tri_idx;
+    uint32_t i0, i1, i2;
 } HitRecord;
 
 typedef struct {
@@ -178,8 +178,8 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
                             float ray_tmax, HitRecord* out) {
     float t_closest = ray_tmax;
 
-    const size_t MAX_BVH_DEPTH = 64;  // todo get from bvh builder
-    size_t node_stack[MAX_BVH_DEPTH];
+    const size_t MAX_BVH_STACK = 64;  // todo get from bvh builder
+    size_t node_stack[MAX_BVH_STACK];
     size_t node_stack_count = 0;
 
     node_stack[node_stack_count++] = 0;
@@ -193,8 +193,7 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
         }
 
         if (node->prims_count > 0) {
-            for (int tidx = node->lp.prims_offset;
-                 tidx < node->lp.prims_offset + node->prims_count; ++tidx) {
+            for (int tidx = node->lp.prims_offset; tidx < node->lp.prims_offset + node->prims_count; ++tidx) {
                 uint32_t tri_index = bvh_prim_indices.at(tidx);
                 uint32_t i0 = indices.at(tri_index * 3 + 0);
                 uint32_t i1 = indices.at(tri_index * 3 + 1);
@@ -209,7 +208,10 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
                     hit_anything = true;
                     t_closest = tris_hit.t;
 
-                    vec3 n_shade = tris_hit.normal;
+                    vec3 n0 = normalize(tv_get_vec3(vb->norm, i0));
+                    vec3 n1 = normalize(tv_get_vec3(vb->norm, i1));
+                    vec3 n2 = normalize(tv_get_vec3(vb->norm, i2));
+                    vec3 n_shade = normalize(bary_lerp(n0, n1, n2, tris_hit.u, tris_hit.v));
                     if (!tris_hit.front_face) n_shade = n_shade * -1;
 
                     out->t = tris_hit.t;
@@ -218,10 +220,13 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
                     out->front_face = tris_hit.front_face;
                     out->u = tris_hit.u;
                     out->v = tris_hit.v;
-                    out->tri_idx = tri_index;
+                    out->i0 = i0;
+                    out->i1 = i1;
+                    out->i2= i2;
                 }
             }
         } else {
+            assert(node_stack_count + 2 < MAX_BVH_STACK);
             node_stack[node_stack_count++] = node->lp.left_idx+1;
             node_stack[node_stack_count++] = node->lp.left_idx;
         }
@@ -242,9 +247,9 @@ __device__ bool mesh_hit(const Ray* ray, const VertexBuffers* vb,
 
     for (size_t m = 0; m < meshes.shape[0]; ++m) {
         Mesh* mesh = &meshes.at(m);
-        if (!ray_aabb_hit(ray, &mesh->box)) {
-            continue;
-        }
+        // if (!ray_aabb_hit(ray, &mesh->box)) {
+        //     continue;
+        // }
 
         uint32_t start = mesh->index_start;
         uint32_t end = start + mesh->index_count;
@@ -266,7 +271,11 @@ __device__ bool mesh_hit(const Ray* ray, const VertexBuffers* vb,
                 hit_anything = true;
                 t_closest = tris_hit.t;
 
-                vec3 n_shade = tris_hit.normal;
+                vec3 n0 = normalize(tv_get_vec3(vb->norm, i0));
+                vec3 n1 = normalize(tv_get_vec3(vb->norm, i1));
+                vec3 n2 = normalize(tv_get_vec3(vb->norm, i2));
+                vec3 n_shade = normalize(bary_lerp(n0, n1, n2, tris_hit.u, tris_hit.v));
+
                 if (!tris_hit.front_face) n_shade = n_shade * -1;
 
                 hit_record->t = tris_hit.t;
@@ -276,7 +285,9 @@ __device__ bool mesh_hit(const Ray* ray, const VertexBuffers* vb,
                 hit_record->u = tris_hit.u;
                 hit_record->v = tris_hit.v;
                 hit_record->material = *material;
-                hit_record->tri_idx = i / 3;
+                hit_record->i0 = i0;
+                hit_record->i1 = i1;
+                hit_record->i2 = i2;
             }
         }
     }
@@ -302,7 +313,9 @@ __device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres,
             hit_record->normal = temp_hit.normal;
             hit_record->point = temp_hit.point;
             hit_record->front_face = temp_hit.front_face;
-            hit_record->tri_idx = i;
+            hit_record->i0 = i;
+            hit_record->i1 = i;
+            hit_record->i2 = i;
         }
     }
 
@@ -428,10 +441,9 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, Scene* scene,
         if (ray_bvh_hit(scene->bvh_nodes, scene->bvh_prim_indices, &current_ray,
                         &scene->vb, scene->indices, 0.001f, tmax,
                         &bvh_hitrec)) {
-            const uint32_t mesh_idx = scene->mesh_ids.at(bvh_hitrec.tri_idx * 3);
+            const uint32_t mesh_idx = scene->mesh_ids.at(bvh_hitrec.i0);
             const Mesh *mesh = &scene->meshes.at(mesh_idx);
-            const uint32_t material_idx = mesh->material_idx;
-            bvh_hitrec.material = scene->materials.at(material_idx);
+            bvh_hitrec.material = scene->materials.at(mesh->material_idx);
             best_hit = bvh_hitrec;
             tmax = bvh_hitrec.t;
             hit_anything = true;
@@ -607,7 +619,7 @@ __global__ void model_to_world_kernel(TensorView<float, 2> d_vb_pos,
                                       TensorView<uint32_t, 1> d_indices,
                                       TensorView<Mesh, 1> d_meshes) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= d_indices.shape[0]) return;
+    if (idx >= d_vb_pos.shape[0]) return;
 
     // Find which mesh this index belongs to
     // (linear search works but is slow; better: precompute a per-index mesh_id
@@ -622,18 +634,16 @@ __global__ void model_to_world_kernel(TensorView<float, 2> d_vb_pos,
         }
     }
 
-    uint32_t vidx = d_indices.at(idx);
-
     // Transform position
-    vec3 pos = tv_get_vec3(d_vb_pos, vidx);
+    vec3 pos = tv_get_vec3(d_vb_pos, idx);
     vec4 pos_h = vec4{pos.x, pos.y, pos.z, 1.0f};
     vec4 pos_w = mat4_lmmul(mesh.model, pos_h);
-    d_vb_pos.at(vidx, 0) = pos_w.x;
-    d_vb_pos.at(vidx, 1) = pos_w.y;
-    d_vb_pos.at(vidx, 2) = pos_w.z;
+    d_vb_pos.at(idx, 0) = pos_w.x;
+    d_vb_pos.at(idx, 1) = pos_w.y;
+    d_vb_pos.at(idx, 2) = pos_w.z;
 
-    if (d_vb_norm.shape[0] > vidx) {
-        vec3 n = tv_get_vec3(d_vb_norm, vidx);
+    if (d_vb_norm.shape[0] > idx) {
+        vec3 n = tv_get_vec3(d_vb_norm, idx);
 
         mat4 inv, normal_mat;
         if (mat4_inverse(mesh.model, inv)) {
@@ -641,9 +651,9 @@ __global__ void model_to_world_kernel(TensorView<float, 2> d_vb_pos,
 
             // apply upper-left 3×3
             vec3 n_w = normalize(mat3_lmmul(normal_mat, n));
-            d_vb_norm.at(vidx, 0) = n_w.x;
-            d_vb_norm.at(vidx, 1) = n_w.y;
-            d_vb_norm.at(vidx, 2) = n_w.z;
+            d_vb_norm.at(idx, 0) = n_w.x;
+            d_vb_norm.at(idx, 1) = n_w.y;
+            d_vb_norm.at(idx, 2) = n_w.z;
         }
     }
 }
@@ -653,7 +663,7 @@ EXTERN_C void model_to_world(TensorView<float, 2> d_vb_pos,
                              TensorView<uint32_t, 1> d_indices,
                              TensorView<Mesh, 1> d_meshes) {
     dim3 block(256);
-    dim3 grid((d_indices.shape[0] + block.x - 1) / block.x);
+    dim3 grid((d_vb_pos.shape[0] + block.x - 1) / block.x);
 
     model_to_world_kernel<<<grid, block>>>(d_vb_pos, d_vb_norm, d_indices,
                                            d_meshes);
