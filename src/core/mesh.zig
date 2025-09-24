@@ -12,12 +12,14 @@ const Triangle = struct {
 pub const MeshAtlas = struct {
     vb: core.HostVertexBuffer,
     indices: std.ArrayList(u32),
+    mesh_ids: std.ArrayList(u32),
     meshes: std.ArrayList(rc.Mesh),
 
     pub fn init(allocator: std.mem.Allocator) MeshAtlas {
         return .{
             .vb = core.HostVertexBuffer.init(allocator),
             .indices = std.ArrayList(u32).init(allocator),
+            .mesh_ids = std.ArrayList(u32).init(allocator),
             .meshes = std.ArrayList(rc.Mesh).init(allocator),
         };
     }
@@ -25,6 +27,7 @@ pub const MeshAtlas = struct {
     pub fn deinit(self: *MeshAtlas) void {
         self.vb.deinit();
         self.indices.deinit();
+        self.mesh_ids.deinit();
         self.meshes.deinit();
     }
 
@@ -41,6 +44,7 @@ pub const MeshAtlas = struct {
         const vertex_start = self.vb.pos_buf.items.len;
         const index_start = self.indices.items.len;
 
+        const mesh_idx = @as(u32, @intCast(self.meshes.items.len));
         for (0..num_tris) |t_idx| {
             for (0..3) |v_idx| {
                 const pos_line = (try reader.readUntilDelimiterOrEof(&line_buf, '\n')).?;
@@ -67,85 +71,88 @@ pub const MeshAtlas = struct {
 
                 try self.vb.push_vertex(vert, col, normal);
                 try self.indices.append(@as(u32, @intCast(vertex_start + t_idx * 3 + v_idx)));
+                try self.mesh_ids.append(mesh_idx);
             }
 
             _ = try reader.readUntilDelimiterOrEof(&line_buf, '\n');
         }
 
-        const mesh = rc.Mesh{
-            .index_start = @as(c_uint, @intCast(index_start)),
-            .index_count = @as(c_uint, @intCast(self.indices.items.len - index_start)),
-            .model = al.mat4_ident(),
-            .material_idx = 0,
-        };
+        var mesh = try self.meshes.addOne();
+        mesh.index_start = @as(c_uint, @intCast(index_start));
+        mesh.index_count = @as(c_uint, @intCast(self.indices.items.len - index_start));
+        mesh.model = al.mat4_ident();
+        mesh.material_idx = 0;
+        mesh.box = .{};
 
-        try self.meshes.append(mesh);
-        return &self.meshes.items[self.meshes.items.len - 1];
+        return mesh;
     }
 
-    pub fn get_mesh_triangle(self: *const MeshAtlas, mesh_idx: usize, tri_index: usize) ?Triangle {
-        if (mesh_idx >= self.meshes.items.len) {
-            return null;
-        }
-        const mesh = &self.meshes.items[mesh_idx];
-        const start = @as(usize, @intCast(mesh.index_start));
-        const count = @as(usize, @intCast(mesh.index_count));
+pub fn get_mesh_triangle(self: *const MeshAtlas, mesh_idx: usize, tri_index: usize) ?Triangle {
+    if (mesh_idx >= self.meshes.items.len) return null;
+    const mesh = &self.meshes.items[mesh_idx];
+    const start = @as(usize, @intCast(mesh.index_start));
+    const count = @as(usize, @intCast(mesh.index_count));
 
-        const base = tri_index * 3;
-        if (base + 2 >= count) {
-            return null;
-        }
+    const base = tri_index * 3;
+    if (base + 2 >= count) return null;
 
-        const idx_1 = self.indices.items[start + base];
-        const idx_2 = self.indices.items[start + base + 1];
-        const idx_3 = self.indices.items[start + base + 2];
-        return .{
-            .pos = .{
-                self.vb.pos_buf.items[idx_1].xyz(),
-                self.vb.pos_buf.items[idx_2].xyz(),
-                self.vb.pos_buf.items[idx_3].xyz(),
-            },
-            .color = .{
-                self.vb.color_buf.items[idx_1],
-                self.vb.color_buf.items[idx_2],
-                self.vb.color_buf.items[idx_3],
-            },
-            .normal = .{
-                self.vb.normal_buf.items[idx_1].xyz(),
-                self.vb.normal_buf.items[idx_2].xyz(),
-                self.vb.normal_buf.items[idx_3].xyz(),
-            },
-        };
-    }
+    const model = mesh.model;
+
+    const idx_1 = self.indices.items[start + base];
+    const idx_2 = self.indices.items[start + base + 1];
+    const idx_3 = self.indices.items[start + base + 2];
+
+    return .{
+        .pos = .{
+            al.transform_pos(model, self.vb.pos_buf.items[idx_1].xyz()),
+            al.transform_pos(model, self.vb.pos_buf.items[idx_2].xyz()),
+            al.transform_pos(model, self.vb.pos_buf.items[idx_3].xyz()),
+        },
+        .color = .{
+            self.vb.color_buf.items[idx_1],
+            self.vb.color_buf.items[idx_2],
+            self.vb.color_buf.items[idx_3],
+        },
+        .normal = .{
+            al.transform_normal(model, self.vb.normal_buf.items[idx_1].xyz()),
+            al.transform_normal(model, self.vb.normal_buf.items[idx_2].xyz()),
+            al.transform_normal(model, self.vb.normal_buf.items[idx_3].xyz()),
+        },
+    };
+}
 
     pub fn num_mesh_triangles(self: *const MeshAtlas, mesh_idx: usize) usize {
         std.debug.assert(mesh_idx < self.meshes.items.len);
         return self.meshes.items[mesh_idx].index_count / 3;
     }
 
-    pub fn get_triangle(self: *const MeshAtlas, tri_index: usize) ?Triangle {
-        if (tri_index >= self.num_triangles()) return null;
-        const vi = tri_index * 3;
+pub fn get_triangle(self: *const MeshAtlas, tri_index: usize) ?Triangle {
+    if (tri_index >= self.num_triangles()) return null;
+    const vi = tri_index * 3;
 
-        return .{
-            .pos = .{
-                self.vb.pos_buf.items[vi].xyz(),
-                self.vb.pos_buf.items[vi+1].xyz(),
-                self.vb.pos_buf.items[vi+2].xyz(),
-            },
-            .color = .{
-                self.vb.color_buf.items[vi],
-                self.vb.color_buf.items[vi+1],
-                self.vb.color_buf.items[vi+2],
-            },
-            .normal = .{
-                self.vb.normal_buf.items[vi].xyz(),
-                self.vb.normal_buf.items[vi+1].xyz(),
-                self.vb.normal_buf.items[vi+2].xyz(),
-            },
-        };
+    const mesh_id = self.mesh_ids.items[vi];
+    if (mesh_id >= @as(u32, @intCast(self.meshes.items.len))) return null;
+    const mesh = &self.meshes.items[mesh_id];
+    const model = mesh.model;
 
-    }
+    return .{
+        .pos = .{
+            al.transform_pos(model, self.vb.pos_buf.items[vi].xyz()),
+            al.transform_pos(model, self.vb.pos_buf.items[vi + 1].xyz()),
+            al.transform_pos(model, self.vb.pos_buf.items[vi + 2].xyz()),
+        },
+        .color = .{
+            self.vb.color_buf.items[vi],
+            self.vb.color_buf.items[vi + 1],
+            self.vb.color_buf.items[vi + 2],
+        },
+        .normal = .{
+            al.transform_normal(model, self.vb.normal_buf.items[vi].xyz()),
+            al.transform_normal(model, self.vb.normal_buf.items[vi + 1].xyz()),
+            al.transform_normal(model, self.vb.normal_buf.items[vi + 2].xyz()),
+        },
+    };
+}
 
     pub fn num_triangles(self: *const MeshAtlas) usize {
         return self.indices.items.len / 3;

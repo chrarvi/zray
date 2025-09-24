@@ -15,7 +15,7 @@ const RNG_SEED: i32 = 1234;
 const AtomicUsize = std.atomic.Value(usize);
 const AtomicBool = std.atomic.Value(bool);
 
-const SIMULATION_FRAMERATE: f32 = 60.0;
+const SIMULATION_FRAMERATE: f32 = 15.0;
 const RENDERING_FRAMERATE: f32 = 30.0;
 
 const NUM_SPHERES = 4;
@@ -110,22 +110,22 @@ pub fn setup_box_scene(
     world: *core.World,
     scene_scale: al.Vec3, // now a vector
 ) !void {
-    // const mat_red_id = try world.register_material(.{
-    //     .kind = rc.MaterialKind.Lambertian,
-    //     .albedo = .{ .x = 0.8, .y = 0.0, .z = 0.0 },
-    // });
-    // const mat_gray_id = try world.register_material(.{
-    //     .kind = rc.MaterialKind.Lambertian,
-    //     .albedo = .{ .x = 0.5, .y = 0.5, .z = 0.5 },
-    // });
-    // const mat_green_id = try world.register_material(.{
-    //     .kind = rc.MaterialKind.Lambertian,
-    //     .albedo = .{ .x = 0.0, .y = 0.8, .z = 0.5 },
-    // });
-    // const mat_light_id = try world.register_material(.{
-    //     .kind = rc.MaterialKind.Emissive,
-    //     .emit = .{ .x = 0.95 * 10.0, .y = 0.7 * 10.0, .z = 0.7 * 10.0 }, // yellowish
-    // });
+    const mat_red_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.8, .y = 0.0, .z = 0.0 },
+    });
+    const mat_gray_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.5, .y = 0.5, .z = 0.5 },
+    });
+    const mat_green_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.0, .y = 0.8, .z = 0.5 },
+    });
+    const mat_light_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Emissive,
+        .emit = .{ .x = 0.95 * 10.0, .y = 0.7 * 10.0, .z = 0.7 * 10.0 }, // yellowish
+    });
 
     const mat_metal_id = try world.register_material(.{
         .kind = rc.MaterialKind.Metal,
@@ -144,8 +144,8 @@ pub fn setup_box_scene(
     //     .refractive_index = 1.0,
     // });
 
-    // const base_cube = "assets/meshes/cube.txt";
-    const base_ico = "assets/meshes/teapot.txt";
+    const base_cube = "assets/meshes/cube.txt";
+    const base_ico = "assets/meshes/icosahedron.txt";
 
     const s = scene_scale; // shorthand
 
@@ -156,18 +156,18 @@ pub fn setup_box_scene(
         mat: c_uint,
     }{
         // walls
-        // .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(-s.x, 0.0, 0.0), .mat = mat_red_id },
-        // .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(s.x, 0.0, 0.0), .mat = mat_green_id },
-        // .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, -s.y, 0.0), .mat = mat_gray_id },
-        // .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, s.y, 0.0), .mat = mat_gray_id },
-        // .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, -s.z), .mat = mat_gray_id },
-        // .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, s.z), .mat = mat_gray_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(-s.x, 0.0, 0.0), .mat = mat_red_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(s.x, 0.0, 0.0), .mat = mat_green_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, -s.y, 0.0), .mat = mat_gray_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, s.y, 0.0), .mat = mat_gray_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, -s.z), .mat = mat_gray_id },
+        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, s.z), .mat = mat_gray_id },
 
-        // // light
-        // .{ .name = base_cube, .scale = al.Vec3.new(0.2 * s.x, 0.1 * s.y, 0.2 * s.z), .translate = al.Vec3.new(0.0, 0.9 * s.y, 0.0), .mat = mat_light_id },
+        // light
+        .{ .name = base_cube, .scale = al.Vec3.new(0.2 * s.x, 0.1 * s.y, 0.2 * s.z), .translate = al.Vec3.new(0.0, 0.9 * s.y, 0.0), .mat = mat_light_id },
 
         // props
-        // .{ .name = base_cube, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.3 * s.x, -0.7 * s.y, -0.5 * s.z), .mat = mat_metal_id },
+        .{ .name = base_cube, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.3 * s.x, -0.7 * s.y, -0.5 * s.z), .mat = mat_metal_id },
         .{ .name = base_ico, .scale = al.Vec3.full(1.0), .translate = al.Vec3.new(-0.0 * s.x, -0.0 * s.y, -0.0 * s.z), .mat = mat_metal_id },
     };
 
@@ -218,14 +218,13 @@ pub fn main() !void {
 
     var world = try core.World.init(gpa);
     defer world.deinit();
-    try setup_box_scene(&world, al.Vec3.full(1.0));
-    // try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
+    try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
     // try setup_teapot_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
 
     // var bvh = core.BVHBuilder.init(gpa);
     // try bvh.build(&world.mesh_atlas, 10);
     // try setup_bvh_scene(&world, &bvh);
-    const bvh_max_depth = 16;
+    const bvh_max_depth = 8;
     try world.bvh.build(&world.mesh_atlas, bvh_max_depth);
 
     const n_spheres = world.spheres.items.len;
@@ -246,6 +245,7 @@ pub fn main() !void {
     try world_dev.spheres.fromHost(world.spheres.items);
     try world_dev.vb.fromHost(&world.mesh_atlas.vb);
     try world_dev.indices.fromHost(world.mesh_atlas.indices.items);
+    try world_dev.mesh_ids.fromHost(world.mesh_atlas.mesh_ids.items);
     try world_dev.meshes.fromHost(world.mesh_atlas.meshes.items);
     try world_dev.materials.fromHost(world.materials.items);
     try world_dev.bvh_to_device(&world.bvh, gpa);
@@ -305,8 +305,8 @@ pub fn main() !void {
             rc.launch_clear_buffer(try shared.frame_buffer_dev_accum.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }));
             shared.cam.temporal_averaging = !shared.cam.temporal_averaging;
             if (shared.cam.temporal_averaging) {
-                shared.cam.max_depth = 16;
-                shared.cam.samples_per_pixel = 32;
+                shared.cam.max_depth = 8;
+                shared.cam.samples_per_pixel = 16;
             } else {
                 shared.cam.max_depth = 2;
                 shared.cam.samples_per_pixel = 4;

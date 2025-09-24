@@ -152,3 +152,21 @@ pub fn mat4_scale(M: *Mat4, s: Vec3) void {
     M[1][1] *= s.y;
     M[2][2] *= s.z;
 }
+
+
+pub fn transform_pos(m: Mat4, v: Vec3) Vec3 {
+    return Vec3.new(
+        m[0][0]*v.x + m[0][1]*v.y + m[0][2]*v.z + m[0][3],
+        m[1][0]*v.x + m[1][1]*v.y + m[1][2]*v.z + m[1][3],
+        m[2][0]*v.x + m[2][1]*v.y + m[2][2]*v.z + m[2][3],
+    );
+}
+
+pub fn transform_normal(m: Mat4, n: Vec3) Vec3 {
+    // Upper-left 3x3
+    return Vec3{
+        .x = m[0][0]*n.x + m[0][1]*n.y + m[0][2]*n.z,
+        .y = m[1][0]*n.x + m[1][1]*n.y + m[1][2]*n.z,
+        .z = m[2][0]*n.x + m[2][1]*n.y + m[2][2]*n.z,
+    };
+}

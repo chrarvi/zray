@@ -7,6 +7,7 @@
 
 #include <cfloat>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <ios>
 
@@ -39,6 +40,7 @@ typedef struct {
     float t;
     bool front_face;
     float u, v;
+    uint32_t tri_idx;
 } HitRecord;
 
 typedef struct {
@@ -61,6 +63,7 @@ typedef struct {
     TensorView<Sphere, 1> spheres;
     VertexBuffers vb;
     TensorView<uint32_t, 1> indices;
+    TensorView<uint32_t, 1> mesh_ids;
     TensorView<Mesh, 1> meshes;
     TensorView<Material, 1> materials;
     TensorView<BVHNode, 1> bvh_nodes;
@@ -179,7 +182,6 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
     size_t node_stack[MAX_BVH_DEPTH];
     size_t node_stack_count = 0;
 
-
     node_stack[node_stack_count++] = 0;
     bool hit_anything = false;
 
@@ -191,7 +193,8 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
         }
 
         if (node->prims_count > 0) {
-            for (int tidx = node->prims_offset; tidx < node->prims_offset + node->prims_count; ++tidx) {
+            for (int tidx = node->prims_offset;
+                 tidx < node->prims_offset + node->prims_count; ++tidx) {
                 uint32_t tri_index = bvh_prim_indices.at(tidx);
                 uint32_t i0 = indices.at(tri_index * 3 + 0);
                 uint32_t i1 = indices.at(tri_index * 3 + 1);
@@ -215,6 +218,7 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
                     out->front_face = tris_hit.front_face;
                     out->u = tris_hit.u;
                     out->v = tris_hit.v;
+                    out->tri_idx = tri_index;
                 }
             }
         } else {
@@ -272,6 +276,7 @@ __device__ bool mesh_hit(const Ray* ray, const VertexBuffers* vb,
                 hit_record->u = tris_hit.u;
                 hit_record->v = tris_hit.v;
                 hit_record->material = *material;
+                hit_record->tri_idx = i / 3;
             }
         }
     }
@@ -297,6 +302,7 @@ __device__ bool spheres_hit(const Ray* ray, TensorView<Sphere, 1> d_spheres,
             hit_record->normal = temp_hit.normal;
             hit_record->point = temp_hit.point;
             hit_record->front_face = temp_hit.front_face;
+            hit_record->tri_idx = i;
         }
     }
 
@@ -419,9 +425,13 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, Scene* scene,
         // }
 
         HitRecord bvh_hitrec;
-        if (ray_bvh_hit(scene->bvh_nodes, scene->bvh_prim_indices, &current_ray, &scene->vb,
-                        scene->indices, 0.001f, tmax, &bvh_hitrec)) {
-            bvh_hitrec.material = scene->materials.at(0);
+        if (ray_bvh_hit(scene->bvh_nodes, scene->bvh_prim_indices, &current_ray,
+                        &scene->vb, scene->indices, 0.001f, tmax,
+                        &bvh_hitrec)) {
+            const uint32_t mesh_idx = scene->mesh_ids.at(bvh_hitrec.tri_idx * 3);
+            const Mesh *mesh = &scene->meshes.at(mesh_idx);
+            const uint32_t material_idx = mesh->material_idx;
+            bvh_hitrec.material = scene->materials.at(material_idx);
             best_hit = bvh_hitrec;
             tmax = bvh_hitrec.t;
             hit_anything = true;
@@ -530,8 +540,9 @@ EXTERN_C void launch_raycast(
     const CameraData* cam, TensorView<Sphere, 1> d_spheres,
     TensorView<float, 2> d_vb_pos, TensorView<float, 2> d_vb_color,
     TensorView<float, 2> d_vb_norm, TensorView<uint32_t, 1> d_indices,
-    TensorView<Mesh, 1> d_meshes, TensorView<Material, 1> d_materials,
-    TensorView<BVHNode, 1> d_bvh_nodes, TensorView<uint32_t, 1> d_bvh_prim_indices, unsigned int frame_idx,
+    TensorView<uint32_t, 1> d_mesh_ids, TensorView<Mesh, 1> d_meshes,
+    TensorView<Material, 1> d_materials, TensorView<BVHNode, 1> d_bvh_nodes,
+    TensorView<uint32_t, 1> d_bvh_prim_indices, unsigned int frame_idx,
     bool temporal_averaging) {
     // d_img: height, width 3
     // d_spheres: n_spheres
@@ -550,6 +561,7 @@ EXTERN_C void launch_raycast(
                 .color = d_vb_color,
             },
         .indices = d_indices,
+        .mesh_ids = d_mesh_ids,
         .meshes = d_meshes,
         .materials = d_materials,
         .bvh_nodes = d_bvh_nodes,

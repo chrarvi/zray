@@ -10,6 +10,7 @@ const DeviceWorld = @This();
 spheres: cu.CudaBuffer(rc.Sphere),
 vb: gpu.DeviceVertexBuffer,
 indices: cu.CudaBuffer(u32),
+mesh_ids: cu.CudaBuffer(u32),
 meshes: cu.CudaBuffer(rc.Mesh),
 partial_aabb: cu.CudaBuffer(rc.AABB),
 materials: cu.CudaBuffer(rc.Material),
@@ -26,6 +27,7 @@ pub fn init(spheres_capacity: usize, vertex_capacity: usize, indices_capactity: 
         // are a thing in meshes.
         // TODO: be more explicit about the size of this cuda buffer
         .indices = try cu.CudaBuffer(u32).init(indices_capactity),
+        .mesh_ids = try cu.CudaBuffer(u32).init(indices_capactity),
         .meshes = try cu.CudaBuffer(rc.Mesh).init(mesh_capacity),
         .materials = try cu.CudaBuffer(rc.Material).init(materials_capacity),
 
@@ -39,6 +41,7 @@ pub fn deinit(self: *DeviceWorld) void {
     self.spheres.deinit();
     self.vb.deinit();
     self.indices.deinit();
+    self.mesh_ids.deinit();
     self.meshes.deinit();
     self.materials.deinit();
     self.partial_aabb.deinit();
