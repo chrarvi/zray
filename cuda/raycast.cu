@@ -193,8 +193,8 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
         }
 
         if (node->prims_count > 0) {
-            for (int tidx = node->prims_offset;
-                 tidx < node->prims_offset + node->prims_count; ++tidx) {
+            for (int tidx = node->lp.prims_offset;
+                 tidx < node->lp.prims_offset + node->prims_count; ++tidx) {
                 uint32_t tri_index = bvh_prim_indices.at(tidx);
                 uint32_t i0 = indices.at(tri_index * 3 + 0);
                 uint32_t i1 = indices.at(tri_index * 3 + 1);
@@ -222,8 +222,8 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
                 }
             }
         } else {
-            node_stack[node_stack_count++] = node->right_idx;
-            node_stack[node_stack_count++] = node->left_idx;
+            node_stack[node_stack_count++] = node->lp.left_idx+1;
+            node_stack[node_stack_count++] = node->lp.left_idx;
         }
     }
     return hit_anything;

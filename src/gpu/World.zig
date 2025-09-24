@@ -60,10 +60,15 @@ pub fn bvh_to_device(self: *DeviceWorld, host: *const HostBVH, alloc: std.mem.Al
             .max = .{ .x=node.box.max.x, .y=node.box.max.y, .z=node.box.max.z },
         };
 
-        n.left_idx = @as(c_int, @intCast(node.left_idx));
-        n.right_idx = @as(c_int, @intCast(node.right_idx));
+        // Union type to store two things in one field since they are
+        // mutually exclusive depending on prims_count
+        if (node.prims_count == 0) {
+            n.lp.left_idx = @as(c_int, @intCast(node.left_idx));
+        } else {
+            n.lp.prims_offset = @as(c_uint, @intCast(node.prims_offset));
+        }
+
         n.prims_count = @as(c_uint, @intCast(node.prims_count));
-        n.prims_offset = @as(c_uint, @intCast(node.prims_offset));
     }
 
     try self.bvh_nodes.fromHost(temp_buffer.items);
