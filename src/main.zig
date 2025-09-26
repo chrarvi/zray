@@ -48,25 +48,24 @@ pub fn setup_teapot_scene(
     world: *core.World,
     scene_scale: al.Vec3,
 ) !void {
-    const mat_red_id = try world.register_material(.{
-        .kind = rc.MaterialKind.Lambertian,
-        .albedo = .{ .x = 0.8, .y = 0.0, .z = 0.0 },
-    });
-    const mat_gray_id = try world.register_material(.{
-        .kind = rc.MaterialKind.Lambertian,
-        .albedo = .{ .x = 0.5, .y = 0.5, .z = 0.5 },
-    });
-    const mat_green_id = try world.register_material(.{
-        .kind = rc.MaterialKind.Lambertian,
-        .albedo = .{ .x = 0.0, .y = 0.8, .z = 0.5 },
-    });
-    const mat_light_id = try world.register_material(.{
-        .kind = rc.MaterialKind.Emissive,
-        .emit = .{ .x = 0.95 * 10.0, .y = 0.7 * 10.0, .z = 0.7 * 10.0 }, // yellowish
+    const mat_glass_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Dielectric,
+        .albedo = .{ .x = 0.5, .y = 0.5, .z = 0.6 },
+        .refractive_index = 10.0,
     });
 
-    const base_cube = "assets/meshes/cube.txt";
-    const base_teapot = "assets/meshes/teapot.txt";
+    const mat_base_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Lambertian,
+        .albedo = .{ .x = 0.1, .y = 0.1, .z = 0.1 },
+    });
+
+    const mat_light_id = try world.register_material(.{
+        .kind = rc.MaterialKind.Emissive,
+        .emit = .{ .x = 0.95 * 5.0, .y = 0.3 * 5.0, .z = 0.3 * 5.0 }, // yellowish
+    });
+
+    //const base_cube = "assets/meshes/cube.txt";
+    const base_teapot = "assets/meshes/teapot_large.txt";
 
     const s = scene_scale;
 
@@ -77,18 +76,7 @@ pub fn setup_teapot_scene(
         mat: c_uint,
     }{
         // props
-        .{ .name = base_teapot, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.0 * s.x, -0.5 * s.y, 0.0 * s.z), .mat = mat_gray_id },
-
-        // walls
-        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(-s.x, 0.0, 0.0), .mat = mat_red_id },
-        .{ .name = base_cube, .scale = al.Vec3.new(0.1 * s.x, 1.0 * s.y, 1.0 * s.z), .translate = al.Vec3.new(s.x, 0.0, 0.0), .mat = mat_green_id },
-        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, -s.y, 0.0), .mat = mat_gray_id },
-        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 0.1 * s.y, 1.0 * s.z), .translate = al.Vec3.new(0.0, s.y, 0.0), .mat = mat_gray_id },
-        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, -s.z), .mat = mat_gray_id },
-        .{ .name = base_cube, .scale = al.Vec3.new(1.0 * s.x, 1.0 * s.y, 0.1 * s.z), .translate = al.Vec3.new(0.0, 0.0, s.z), .mat = mat_gray_id },
-
-        // light
-        .{ .name = base_cube, .scale = al.Vec3.new(0.2 * s.x, 0.1 * s.y, 0.2 * s.z), .translate = al.Vec3.new(0.0, 0.9 * s.y, 0.0), .mat = mat_light_id },
+        .{ .name = base_teapot, .scale = al.Vec3.full(0.7), .translate = al.Vec3.new(0.0 * s.x, -0.5 * s.y, 0.0 * s.z), .mat = mat_glass_id },
     };
 
     for (instances) |desc| {
@@ -100,9 +88,15 @@ pub fn setup_teapot_scene(
 
     // mock sphere
     try world.spheres.append(.{
-        .center = .{ .x = 1000.0 * s.x, .y = 0.0 * s.y, .z = 0.0 * s.z },
-        .radius = 0.1,
-        .material_idx = mat_gray_id,
+        .center = .{.x=-0.5 * s.x, .y=4.0 * s.y, .z=0.0 * s.z},
+        .radius = 1.0,
+        .material_idx = mat_light_id,
+    });
+
+    try world.spheres.append(.{
+        .center = .{.x=0.0 * s.x, .y=-101.0 * s.y, .z=0.0 * s.z},
+        .radius = 100.0,
+        .material_idx = mat_base_id,
     });
 }
 
@@ -190,7 +184,7 @@ pub fn main() !void {
     var gpa = std.heap.page_allocator;
 
     const aspect_ratio = 16.0 / 9.0;
-    const image_width: u32 = 1080;
+    const image_width: u32 = 1920;
     const image_height: u32 = @intFromFloat(@max(@divFloor(@as(f32, @floatFromInt(image_width)), aspect_ratio), 1));
 
     // double-buffering
@@ -218,10 +212,10 @@ pub fn main() !void {
 
     var world = try core.World.init(gpa);
     defer world.deinit();
-    try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
-    // try setup_teapot_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
+    // try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
+    try setup_teapot_scene(&world, al.Vec3.full(1.0));
 
-    const bvh_max_depth = 16;
+    const bvh_max_depth = 24;
     try world.bvh.build(&world.mesh_atlas, bvh_max_depth);
 
     const n_spheres = world.spheres.items.len;

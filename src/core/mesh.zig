@@ -7,6 +7,10 @@ const Triangle = struct {
     pos: [3]al.Vec3,
     color: [3]al.Vec4,
     normal: [3]al.Vec3,
+
+    fn centroid(self: *const Triangle) al.Vec3 {
+        return self.pos[0].add(self.pos[1]).add(self.pos[2]).scale(1.0 / 3.0);
+    }
 };
 
 pub const MeshAtlas = struct {

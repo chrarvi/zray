@@ -9,7 +9,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <ios>
 
 #include "assert.h"
 #include "math.cuh"
@@ -177,60 +176,79 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
                             TensorView<uint32_t, 1> indices, float ray_tmin,
                             float ray_tmax, HitRecord* out) {
     float t_closest = ray_tmax;
-
-    const size_t MAX_BVH_STACK = 64;  // todo get from bvh builder
-    size_t node_stack[MAX_BVH_STACK];
-    size_t node_stack_count = 0;
-
-    node_stack[node_stack_count++] = 0;
     bool hit_anything = false;
 
-    while (node_stack_count > 0) {
-        size_t node_idx = node_stack[--node_stack_count];
-        BVHNode const* node = &bvh_nodes.at(node_idx);
-        if (!ray_aabb_hit(ray, &node->box)) {
-            continue;
-        }
+    const int MAX_STACK = 64;
+    int stack[MAX_STACK];
+    int stack_count = 0;
+
+    stack[stack_count++] = 0;  // root
+
+    while (stack_count > 0) {
+        int node_idx = stack[--stack_count];
+        const BVHNode* node = &bvh_nodes.at(node_idx);
+
+        if (!ray_aabb_hit(ray, &node->box)) continue;
 
         if (node->prims_count > 0) {
-            for (int tidx = node->lp.prims_offset; tidx < node->lp.prims_offset + node->prims_count; ++tidx) {
-                uint32_t tri_index = bvh_prim_indices.at(tidx);
+            // Leaf node: intersect triangles
+            for (int i = node->lp.prims_offset;
+                 i < node->lp.prims_offset + node->prims_count; ++i) {
+                uint32_t tri_index = bvh_prim_indices.at(i);
                 uint32_t i0 = indices.at(tri_index * 3 + 0);
                 uint32_t i1 = indices.at(tri_index * 3 + 1);
                 uint32_t i2 = indices.at(tri_index * 3 + 2);
-                vec3 p1_world = tv_get_vec3(vb->pos, i0);
-                vec3 p2_world = tv_get_vec3(vb->pos, i1);
-                vec3 p3_world = tv_get_vec3(vb->pos, i2);
 
-                HitRecord tris_hit = {};
-                if (ray_triangle_hit(p1_world, p2_world, p3_world, ray,
-                                     ray_tmin, t_closest, &tris_hit)) {
+                vec3 p0 = tv_get_vec3(vb->pos, i0);
+                vec3 p1 = tv_get_vec3(vb->pos, i1);
+                vec3 p2 = tv_get_vec3(vb->pos, i2);
+
+                HitRecord tris_hit;
+                if (ray_triangle_hit(p0, p1, p2, ray, ray_tmin, t_closest,
+                                     &tris_hit)) {
                     hit_anything = true;
                     t_closest = tris_hit.t;
 
                     vec3 n0 = normalize(tv_get_vec3(vb->norm, i0));
                     vec3 n1 = normalize(tv_get_vec3(vb->norm, i1));
                     vec3 n2 = normalize(tv_get_vec3(vb->norm, i2));
-                    vec3 n_shade = normalize(bary_lerp(n0, n1, n2, tris_hit.u, tris_hit.v));
-                    if (!tris_hit.front_face) n_shade = n_shade * -1;
+                    vec3 n = normalize(
+                        bary_lerp(n0, n1, n2, tris_hit.u, tris_hit.v));
+                    if (!tris_hit.front_face) n = n * -1.0f;
 
                     out->t = tris_hit.t;
                     out->point = tris_hit.point;
-                    out->normal = n_shade;
+                    out->normal = n;
                     out->front_face = tris_hit.front_face;
                     out->u = tris_hit.u;
                     out->v = tris_hit.v;
                     out->i0 = i0;
                     out->i1 = i1;
-                    out->i2= i2;
+                    out->i2 = i2;
                 }
             }
         } else {
-            assert(node_stack_count + 2 < MAX_BVH_STACK);
-            node_stack[node_stack_count++] = node->lp.left_idx+1;
-            node_stack[node_stack_count++] = node->lp.left_idx;
+            // Internal node: traverse closest child first
+            int left = node->lp.left_idx;
+            int right = node->lp.left_idx + 1;
+
+            const BVHNode* left_node = &bvh_nodes.at(left);
+            const BVHNode* right_node = &bvh_nodes.at(right);
+
+            float t_left = ray_aabb_hit(ray, &left_node->box) ? 0.0f : INFINITY;
+            float t_right =
+                ray_aabb_hit(ray, &right_node->box) ? 0.0f : INFINITY;
+
+            if (t_left < t_right) {
+                if (t_right < INFINITY) stack[stack_count++] = right;
+                if (t_left < INFINITY) stack[stack_count++] = left;
+            } else {
+                if (t_left < INFINITY) stack[stack_count++] = left;
+                if (t_right < INFINITY) stack[stack_count++] = right;
+            }
         }
     }
+
     return hit_anything;
 }
 
@@ -274,7 +292,8 @@ __device__ bool mesh_hit(const Ray* ray, const VertexBuffers* vb,
                 vec3 n0 = normalize(tv_get_vec3(vb->norm, i0));
                 vec3 n1 = normalize(tv_get_vec3(vb->norm, i1));
                 vec3 n2 = normalize(tv_get_vec3(vb->norm, i2));
-                vec3 n_shade = normalize(bary_lerp(n0, n1, n2, tris_hit.u, tris_hit.v));
+                vec3 n_shade =
+                    normalize(bary_lerp(n0, n1, n2, tris_hit.u, tris_hit.v));
 
                 if (!tris_hit.front_face) n_shade = n_shade * -1;
 
@@ -442,7 +461,7 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, Scene* scene,
                         &scene->vb, scene->indices, 0.001f, tmax,
                         &bvh_hitrec)) {
             const uint32_t mesh_idx = scene->mesh_ids.at(bvh_hitrec.i0);
-            const Mesh *mesh = &scene->meshes.at(mesh_idx);
+            const Mesh* mesh = &scene->meshes.at(mesh_idx);
             bvh_hitrec.material = scene->materials.at(mesh->material_idx);
             best_hit = bvh_hitrec;
             tmax = bvh_hitrec.t;
