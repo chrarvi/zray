@@ -3,7 +3,7 @@ const rc = @import("raycast.zig");
 const cu = @import("cuda.zig");
 const gpu = @import("gpu.zig");
 
-const HostBVH = @import("../core/bvh.zig").BVHBuilder;
+const HostBVH = @import("../core/bvh.zig").BLASBuilder;
 
 const DeviceWorld = @This();
 
@@ -14,11 +14,14 @@ mesh_ids: cu.CudaBuffer(u32),
 meshes: cu.CudaBuffer(rc.Mesh),
 partial_aabb: cu.CudaBuffer(rc.AABB),
 materials: cu.CudaBuffer(rc.Material),
-bvh_nodes: cu.CudaBuffer(rc.BVHNode),
-bvh_prim_indices: cu.CudaBuffer(u32),
+blas_nodes: cu.CudaBuffer(rc.BVHNode),
+blas_prim_indices: cu.CudaBuffer(u32),
+tlas_nodes: cu.CudaBuffer(rc.BVHNode),
+tlas_prim_indices: cu.CudaBuffer(u32),
 
-pub fn init(spheres_capacity: usize, vertex_capacity: usize, indices_capactity: usize, mesh_capacity: usize, materials_capacity: usize, bvh_max_depth: usize) !DeviceWorld {
-    const bvh_size = std.math.pow(usize, 2, bvh_max_depth + 1) - 1;
+pub fn init(spheres_capacity: usize, vertex_capacity: usize, indices_capactity: usize, mesh_capacity: usize, materials_capacity: usize, blas_max_depth: usize, tlas_max_depth: usize) !DeviceWorld {
+    const blas_size = std.math.pow(usize, 2, blas_max_depth + 1) - 1;
+    const tlas_size = std.math.pow(usize, 2, tlas_max_depth + 1) - 1;
     return .{
         .spheres = try cu.CudaBuffer(rc.Sphere).init(spheres_capacity),
         .vb = try gpu.DeviceVertexBuffer.init(vertex_capacity),
@@ -32,8 +35,10 @@ pub fn init(spheres_capacity: usize, vertex_capacity: usize, indices_capactity: 
         .materials = try cu.CudaBuffer(rc.Material).init(materials_capacity),
 
         .partial_aabb = try cu.CudaBuffer(rc.AABB).init(mesh_capacity*128),
-        .bvh_nodes = try cu.CudaBuffer(rc.BVHNode).init(bvh_size),
-        .bvh_prim_indices = try cu.CudaBuffer(u32).init(vertex_capacity / 3),
+        .blas_nodes = try cu.CudaBuffer(rc.BVHNode).init(blas_size),
+        .blas_prim_indices = try cu.CudaBuffer(u32).init(vertex_capacity / 3),
+        .tlas_nodes = try cu.CudaBuffer(rc.BVHNode).init(tlas_size),
+        .tlas_prim_indices = try cu.CudaBuffer(u32).init(mesh_capacity),
     };
 }
 
@@ -45,8 +50,8 @@ pub fn deinit(self: *DeviceWorld) void {
     self.meshes.deinit();
     self.materials.deinit();
     self.partial_aabb.deinit();
-    self.bvh_nodes.deinit();
-    self.bvh_prim_indices.deinit();
+    self.blas_nodes.deinit();
+    self.blas_prim_indices.deinit();
 }
 
 pub fn bvh_to_device(self: *DeviceWorld, host: *const HostBVH, alloc: std.mem.Allocator) !void {
@@ -71,6 +76,6 @@ pub fn bvh_to_device(self: *DeviceWorld, host: *const HostBVH, alloc: std.mem.Al
         n.prims_count = @as(c_uint, @intCast(node.prims_count));
     }
 
-    try self.bvh_nodes.fromHost(temp_buffer.items);
-    try self.bvh_prim_indices.fromHost(host.prim_indices.items);
+    try self.blas_nodes.fromHost(temp_buffer.items);
+    try self.blas_prim_indices.fromHost(host.prim_indices.items);
 }

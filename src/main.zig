@@ -20,9 +20,12 @@ const RENDERING_FRAMERATE: f32 = 144.0;
 
 const NUM_SPHERES = 4;
 
+const BLAS_MAX_DEPTH = 24;
+const TLAS_MAX_DEPTH = 20;
+
 pub fn setup_bvh_scene(
     world: *core.World,
-    bvh: *const core.BVHBuilder,
+    bvh: *const core.BLASBuilder,
 ) !void {
     const mat_wire_id = try world.register_material(.{
         .kind = rc.MaterialKind.Lambertian,
@@ -65,7 +68,7 @@ pub fn setup_teapot_scene(
     });
 
     //const base_cube = "assets/meshes/cube.txt";
-    const base_teapot = "assets/meshes/teapot_large.txt";
+    const base_teapot = "assets/meshes/teapot.txt";
 
     const s = scene_scale;
 
@@ -212,11 +215,11 @@ pub fn main() !void {
 
     var world = try core.World.init(gpa);
     defer world.deinit();
-    // try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
-    try setup_teapot_scene(&world, al.Vec3.full(1.0));
+    try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
+    // try setup_teapot_scene(&world, al.Vec3.full(1.0));
 
-    const bvh_max_depth = 24;
-    try world.bvh.build(&world.mesh_atlas, bvh_max_depth);
+    try world.blas.build(&world.mesh_atlas, BLAS_MAX_DEPTH);
+    try world.tlas.build(&world.mesh_atlas, TLAS_MAX_DEPTH);
 
     const n_spheres = world.spheres.items.len;
     const n_vertex = world.mesh_atlas.vb.pos_buf.items.len;
@@ -229,7 +232,8 @@ pub fn main() !void {
         n_indices,
         n_meshes,
         n_materials,
-        bvh_max_depth,
+        BLAS_MAX_DEPTH,
+        TLAS_MAX_DEPTH,
     );
     defer world_dev.deinit();
 
@@ -239,7 +243,7 @@ pub fn main() !void {
     try world_dev.mesh_ids.fromHost(world.mesh_atlas.mesh_ids.items);
     try world_dev.meshes.fromHost(world.mesh_atlas.meshes.items);
     try world_dev.materials.fromHost(world.materials.items);
-    try world_dev.bvh_to_device(&world.bvh, gpa);
+    try world_dev.bvh_to_device(&world.blas, gpa);
 
     var shared = sim.SimSharedState{
         .frame_buffers_host = .{ img_host0, img_host1 },
@@ -247,7 +251,8 @@ pub fn main() !void {
         .frame_buffer_dev_accum = try cu.CudaBuffer(f32).init(buf_size),
         .ready_idx = AtomicUsize.init(0),
         .running = AtomicBool.init(true),
-        .bvh_max_depth = bvh_max_depth,
+        .blas_max_depth = BLAS_MAX_DEPTH,
+        .tlas_max_depth = TLAS_MAX_DEPTH,
         .cam = rc.CameraData{
             .image_width = image_width,
             .image_height = image_height,

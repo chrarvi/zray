@@ -12,7 +12,8 @@ pub const SimSharedState = struct {
     frame_buffer_dev_accum: gpu.cuda.CudaBuffer(f32),
     ready_idx: AtomicUsize, // which buffer is ready for display
     running: AtomicBool, // shutdown flag
-    bvh_max_depth: u32,
+    blas_max_depth: u32,
+    tlas_max_depth: u32,
     cam: rc.CameraData,
     world: *core.World,
     world_dev: *gpu.DeviceWorld,
@@ -91,8 +92,10 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
             try wd.mesh_ids.view(1, .{shared.world.mesh_atlas.mesh_ids.items.len}),
             try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
             try wd.materials.view(1, .{shared.world.materials.items.len}),
-            try wd.bvh_nodes.view(1, .{std.math.pow(u32, 2, shared.bvh_max_depth + 1) - 1}),
-            try wd.bvh_prim_indices.view(1, .{shared.world.bvh.prim_indices.items.len}),
+            try wd.blas_nodes.view(1, .{std.math.pow(u32, 2, shared.blas_max_depth + 1) - 1}),
+            try wd.blas_prim_indices.view(1, .{shared.world.blas.prim_indices.items.len}),
+            try wd.tlas_nodes.view(1, .{std.math.pow(u32, 2, shared.tlas_max_depth + 1) - 1}),
+            try wd.tlas_prim_indices.view(1, .{shared.world.tlas.prim_indices.items.len}),
             shared.frame_idx,
             shared.cam.temporal_averaging,
         );

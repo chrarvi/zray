@@ -10,4 +10,5 @@ pub const World = @import("World.zig");
 pub const MeshAtlas = @import("mesh.zig").MeshAtlas;
 pub const Mesh = @import("mesh.zig").Mesh;
 
-pub const BVHBuilder = @import("bvh.zig").BVHBuilder;
+pub const BLASBuilder = @import("bvh.zig").BLASBuilder;
+pub const TLASBuilder = @import("bvh.zig").TLASBuilder;

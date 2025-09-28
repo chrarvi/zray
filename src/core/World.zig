@@ -7,14 +7,16 @@ const World = @This();
 spheres: std.ArrayList(rc.Sphere),
 mesh_atlas: core.MeshAtlas,
 materials: std.ArrayList(rc.Material),
-bvh: core.BVHBuilder,
+blas: core.BLASBuilder,
+tlas: core.TLASBuilder,
 
 pub fn init(allocator: std.mem.Allocator) !World {
     return .{
         .spheres = std.ArrayList(rc.Sphere).init(allocator),
         .mesh_atlas = core.MeshAtlas.init(allocator),
         .materials = std.ArrayList(rc.Material).init(allocator),
-        .bvh = core.BVHBuilder.init(allocator),
+        .blas = core.BLASBuilder.init(allocator),
+        .tlas = core.TLASBuilder.init(allocator),
     };
 }
 
@@ -22,7 +24,8 @@ pub fn deinit(self: *World) void {
     self.spheres.deinit();
     self.mesh_atlas.deinit();
     self.materials.deinit();
-    self.bvh.deinit();
+    self.blas.deinit();
+    self.tlas.deinit();
 }
 
 pub fn register_material(self: *World, mat: rc.Material) !u32 {

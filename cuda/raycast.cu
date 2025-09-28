@@ -65,8 +65,10 @@ typedef struct {
     TensorView<uint32_t, 1> mesh_ids;
     TensorView<Mesh, 1> meshes;
     TensorView<Material, 1> materials;
-    TensorView<BVHNode, 1> bvh_nodes;
-    TensorView<uint32_t, 1> bvh_prim_indices;
+    TensorView<BVHNode, 1> blas_nodes;
+    TensorView<uint32_t, 1> blas_prim_indices;
+    TensorView<BVHNode, 1> tlas_nodes;
+    TensorView<uint32_t, 1> tlas_prim_indices;
 } Scene;
 
 __device__ inline vec3 tv_get_vec3(TensorView<float, 2> tv, size_t i) {
@@ -170,8 +172,10 @@ __device__ bool ray_aabb_hit(const Ray* ray, const AABB* box) {
     return (t_close <= t_far) && (t_far >= 0.0f);
 }
 
-__device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
-                            TensorView<uint32_t, 1> bvh_prim_indices,
+__device__ bool ray_bvh_hit(TensorView<BVHNode, 1> blas_nodes,
+                            TensorView<uint32_t, 1> blas_prim_indices,
+                            TensorView<BVHNode, 1> tlas_nodes,
+                            TensorView<uint32_t, 1> tlas_prim_indices,
                             Ray const* ray, VertexBuffers const* vb,
                             TensorView<uint32_t, 1> indices, float ray_tmin,
                             float ray_tmax, HitRecord* out) {
@@ -186,7 +190,7 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
 
     while (stack_count > 0) {
         int node_idx = stack[--stack_count];
-        const BVHNode* node = &bvh_nodes.at(node_idx);
+        const BVHNode* node = &blas_nodes.at(node_idx);
 
         if (!ray_aabb_hit(ray, &node->box)) continue;
 
@@ -194,7 +198,7 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
             // Leaf node: intersect triangles
             for (int i = node->lp.prims_offset;
                  i < node->lp.prims_offset + node->prims_count; ++i) {
-                uint32_t tri_index = bvh_prim_indices.at(i);
+                uint32_t tri_index = blas_prim_indices.at(i);
                 uint32_t i0 = indices.at(tri_index * 3 + 0);
                 uint32_t i1 = indices.at(tri_index * 3 + 1);
                 uint32_t i2 = indices.at(tri_index * 3 + 2);
@@ -232,8 +236,8 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
             int left = node->lp.left_idx;
             int right = node->lp.left_idx + 1;
 
-            const BVHNode* left_node = &bvh_nodes.at(left);
-            const BVHNode* right_node = &bvh_nodes.at(right);
+            const BVHNode* left_node = &blas_nodes.at(left);
+            const BVHNode* right_node = &blas_nodes.at(right);
 
             float t_left = ray_aabb_hit(ray, &left_node->box) ? 0.0f : INFINITY;
             float t_right =
@@ -457,8 +461,9 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, Scene* scene,
         // }
 
         HitRecord bvh_hitrec;
-        if (ray_bvh_hit(scene->bvh_nodes, scene->bvh_prim_indices, &current_ray,
-                        &scene->vb, scene->indices, 0.001f, tmax,
+        if (ray_bvh_hit(scene->blas_nodes, scene->blas_prim_indices,
+                        scene->tlas_nodes, scene->tlas_prim_indices,
+                        &current_ray, &scene->vb, scene->indices, 0.001f, tmax,
                         &bvh_hitrec)) {
             const uint32_t mesh_idx = scene->mesh_ids.at(bvh_hitrec.i0);
             const Mesh* mesh = &scene->meshes.at(mesh_idx);
@@ -572,8 +577,10 @@ EXTERN_C void launch_raycast(
     TensorView<float, 2> d_vb_pos, TensorView<float, 2> d_vb_color,
     TensorView<float, 2> d_vb_norm, TensorView<uint32_t, 1> d_indices,
     TensorView<uint32_t, 1> d_mesh_ids, TensorView<Mesh, 1> d_meshes,
-    TensorView<Material, 1> d_materials, TensorView<BVHNode, 1> d_bvh_nodes,
-    TensorView<uint32_t, 1> d_bvh_prim_indices, unsigned int frame_idx,
+    TensorView<Material, 1> d_materials, TensorView<BVHNode, 1> d_blas_nodes,
+    TensorView<uint32_t, 1> d_blas_prim_indices,
+    TensorView<BVHNode, 1> d_tlas_nodes,
+    TensorView<uint32_t, 1> d_tlas_prim_indices, unsigned int frame_idx,
     bool temporal_averaging) {
     // d_img: height, width 3
     // d_spheres: n_spheres
@@ -583,21 +590,21 @@ EXTERN_C void launch_raycast(
     // d_indices: n_mesh_indices
     // d_meshes: n_meshes
     // d_materials: n_materials
-    Scene scene = Scene{
-        .spheres = d_spheres,
-        .vb =
-            VertexBuffers{
-                .pos = d_vb_pos,
-                .norm = d_vb_norm,
-                .color = d_vb_color,
-            },
-        .indices = d_indices,
-        .mesh_ids = d_mesh_ids,
-        .meshes = d_meshes,
-        .materials = d_materials,
-        .bvh_nodes = d_bvh_nodes,
-        .bvh_prim_indices = d_bvh_prim_indices,
-    };
+    Scene scene = Scene{.spheres = d_spheres,
+                        .vb =
+                            VertexBuffers{
+                                .pos = d_vb_pos,
+                                .norm = d_vb_norm,
+                                .color = d_vb_color,
+                            },
+                        .indices = d_indices,
+                        .mesh_ids = d_mesh_ids,
+                        .meshes = d_meshes,
+                        .materials = d_materials,
+                        .blas_nodes = d_blas_nodes,
+                        .blas_prim_indices = d_blas_prim_indices,
+                        .tlas_nodes = d_tlas_nodes,
+                        .tlas_prim_indices = d_tlas_prim_indices};
 
     dim3 block(32, 8);
     dim3 grid((cam->image_width + block.x - 1) / block.x,

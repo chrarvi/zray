@@ -31,8 +31,10 @@ pub extern fn launch_raycast(
     d_mesh_ids: cu.TensorView(u32, 1),
     d_meshes: cu.TensorView(Mesh, 1),
     d_materials: cu.TensorView(Material, 1),
-    d_bvh_nodes: cu.TensorView(BVHNode, 1),
-    d_bvh_prim_indices: cu.TensorView(u32, 1),
+    d_blas_nodes: cu.TensorView(BVHNode, 1),
+    d_blas_prim_indices: cu.TensorView(u32, 1),
+    d_tlas_nodes: cu.TensorView(BVHNode, 1),
+    d_tlas_prim_indices: cu.TensorView(u32, 1),
     frame_idx: u32,
     temporal_averaging: bool,
 ) void;
