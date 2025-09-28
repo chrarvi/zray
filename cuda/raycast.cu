@@ -176,6 +176,7 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> blas_nodes,
                             TensorView<uint32_t, 1> blas_prim_indices,
                             TensorView<BVHNode, 1> tlas_nodes,
                             TensorView<uint32_t, 1> tlas_prim_indices,
+                            TensorView<uint32_t, 1> mesh_ids, TensorView<Mesh, 1> meshes,
                             Ray const* ray, VertexBuffers const* vb,
                             TensorView<uint32_t, 1> indices, float ray_tmin,
                             float ray_tmax, HitRecord* out) {
@@ -207,8 +208,20 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> blas_nodes,
                 vec3 p1 = tv_get_vec3(vb->pos, i1);
                 vec3 p2 = tv_get_vec3(vb->pos, i2);
 
+                uint32_t mesh_id = mesh_ids.at(i0);
+                Mesh* mesh = &meshes.at(mesh_id);
+
+                vec4 ray_o_h = {ray->origin.x, ray->origin.y, ray->origin.z, 1.0};
+                vec4 ray_d_h = {ray->dir.x, ray->dir.y, ray->dir.z, 0.0};
+                vec4 ray_o_model = mat4_lmmul(mesh->inv_model, ray_o_h);
+                vec4 ray_d_model = mat4_lmmul(mesh->inv_model, ray_d_h);
+                Ray ray_model = {
+                    .origin = {ray_o_model.x, ray_o_model.y, ray_o_model.z},
+                    .dir = {ray_d_model.x, ray_d_model.y, ray_d_model.z},
+                };
+
                 HitRecord tris_hit;
-                if (ray_triangle_hit(p0, p1, p2, ray, ray_tmin, t_closest,
+                if (ray_triangle_hit(p0, p1, p2, &ray_model, ray_tmin, t_closest,
                                      &tris_hit)) {
                     hit_anything = true;
                     t_closest = tris_hit.t;
@@ -463,6 +476,7 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, Scene* scene,
         HitRecord bvh_hitrec;
         if (ray_bvh_hit(scene->blas_nodes, scene->blas_prim_indices,
                         scene->tlas_nodes, scene->tlas_prim_indices,
+                        scene->mesh_ids, scene->meshes,
                         &current_ray, &scene->vb, scene->indices, 0.001f, tmax,
                         &bvh_hitrec)) {
             const uint32_t mesh_idx = scene->mesh_ids.at(bvh_hitrec.i0);

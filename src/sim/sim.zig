@@ -53,12 +53,12 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
     var last = try std.time.Instant.now();
 
     const wd = shared.world_dev;
-    rc.model_to_world(
-            try wd.vb.pos_buf.view(2, .{ wd.vb.pos_buf.len / 4, 4 }),
-            try wd.vb.normal_buf.view(2, .{ wd.vb.normal_buf.len / 4, 4 }),
-            try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
-            try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
-    );
+    // rc.model_to_world(
+    //         try wd.vb.pos_buf.view(2, .{ wd.vb.pos_buf.len / 4, 4 }),
+    //         try wd.vb.normal_buf.view(2, .{ wd.vb.normal_buf.len / 4, 4 }),
+    //         try wd.indices.view(1, .{shared.world.mesh_atlas.indices.items.len}),
+    //         try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
+    // );
     while (shared.running.load(.acquire)) {
         const now = try std.time.Instant.now();
         const since_f32 = @as(f32, @floatFromInt(now.since(last)));

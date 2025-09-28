@@ -299,6 +299,14 @@ inline __device__ vec3 mat3_lmmul(const float M[4][4], const vec3 v) {
     return r;
 }
 
+inline __device__ vec3 mat3_rmmul(const vec3 v, const float M[4][4]) {
+    vec3 r;
+    r.x = M[0][0] * v.x + M[1][0] * v.y + M[2][0] * v.z;
+    r.y = M[0][1] * v.x + M[1][1] * v.y + M[2][1] * v.z;
+    r.z = M[0][2] * v.x + M[1][2] * v.y + M[2][2] * v.z;
+    return r;
+}
+
 inline __device__ bool normal_matrix_from_mat4(const mat4 M, mat4 out) {
     // Inverse–transpose of the model matrix
     mat4 invM;

@@ -69,6 +69,7 @@ typedef struct {
     unsigned int index_start;
     unsigned int index_count;
     mat4 model;
+    mat4 inv_model;
     AABB box;
     unsigned int material_idx;
 } Mesh;

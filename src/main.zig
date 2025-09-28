@@ -41,6 +41,7 @@ pub fn setup_bvh_scene(
 
             _ = al.mat4_scale(&mesh.model, extent.divc(2.0));
             _ = al.mat4_translate(&mesh.model, center);
+            mesh.inv_model = al.mat4_inverse(mesh.model).?;
 
             mesh.material_idx = mat_wire_id;
         }
@@ -86,6 +87,7 @@ pub fn setup_teapot_scene(
         var mesh = try world.mesh_atlas.parse_mesh_from_file(desc.name);
         _ = al.mat4_scale(&mesh.model, desc.scale);
         _ = al.mat4_translate(&mesh.model, desc.translate);
+        mesh.inv_model = al.mat4_inverse(mesh.model).?;
         mesh.material_idx = desc.mat;
     }
 
@@ -172,6 +174,7 @@ pub fn setup_box_scene(
         var mesh = try world.mesh_atlas.parse_mesh_from_file(desc.name);
         _ = al.mat4_scale(&mesh.model, desc.scale);
         _ = al.mat4_translate(&mesh.model, desc.translate);
+        mesh.inv_model = al.mat4_inverse(mesh.model).?;
         mesh.material_idx = desc.mat;
     }
 

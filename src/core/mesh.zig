@@ -85,6 +85,7 @@ pub const MeshAtlas = struct {
         mesh.index_start = @as(c_uint, @intCast(index_start));
         mesh.index_count = @as(c_uint, @intCast(self.indices.items.len - index_start));
         mesh.model = al.mat4_ident();
+        mesh.inv_model = al.mat4_inverse(mesh.model).?;
         mesh.material_idx = 0;
         mesh.box = .{};
 
@@ -141,14 +142,12 @@ pub fn get_mesh_triangle(self: *const MeshAtlas, mesh_idx: usize, tri_index: usi
         const mesh_id = self.mesh_ids.items[base];
 
         if (mesh_id >= @as(u32, @intCast(self.meshes.items.len))) return null;
-        const mesh = &self.meshes.items[mesh_id];
-        const model = mesh.model;
 
         return .{
             .pos = .{
-                al.transform_pos(model, self.vb.pos_buf.items[idx_1].xyz()),
-                al.transform_pos(model, self.vb.pos_buf.items[idx_2].xyz()),
-                al.transform_pos(model, self.vb.pos_buf.items[idx_3].xyz()),
+                self.vb.pos_buf.items[idx_1].xyz(),
+                self.vb.pos_buf.items[idx_2].xyz(),
+                self.vb.pos_buf.items[idx_3].xyz(),
             },
             .color = .{
                 self.vb.color_buf.items[idx_1],
@@ -156,9 +155,9 @@ pub fn get_mesh_triangle(self: *const MeshAtlas, mesh_idx: usize, tri_index: usi
                 self.vb.color_buf.items[idx_3],
             },
             .normal = .{
-                al.transform_normal(model, self.vb.normal_buf.items[idx_1].xyz()),
-                al.transform_normal(model, self.vb.normal_buf.items[idx_2].xyz()),
-                al.transform_normal(model, self.vb.normal_buf.items[idx_3].xyz()),
+                self.vb.normal_buf.items[idx_1].xyz(),
+                self.vb.normal_buf.items[idx_2].xyz(),
+                self.vb.normal_buf.items[idx_3].xyz(),
             },
         };
     }
