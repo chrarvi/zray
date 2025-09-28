@@ -1,13 +1,15 @@
 const std = @import("std");
 
-pub fn compile_cuda(b: *std.Build, cuda_file: []const u8, obj_file: []const u8) *std.Build.Step {
-    const cuda_gen_step = b.addSystemCommand(&.{
-        "nvcc", "-Xcompiler", "-fPIC", "-c", "-o", obj_file, cuda_file,
-    });
-    return &cuda_gen_step.step;
+pub fn compile_cuda(b: *std.Build, cuda_file: []const u8, obj_file: []const u8) std.Build.LazyPath {
+    var cuda_gen_step = b.addSystemCommand(&.{"nvcc"});
+    cuda_gen_step.addArgs(&.{ "-Xcompiler", "-fPIC" });
+    cuda_gen_step.addArgs(&.{ "-c", cuda_file });
+    cuda_gen_step.addFileInput(b.path(cuda_file));
+    cuda_gen_step.addArg("-o");
+    return cuda_gen_step.addOutputFileArg(obj_file);
 }
 
-pub fn link_cuda(b: *std.Build, exe: *std.Build.Step.Compile) void{
+pub fn link_cuda(b: *std.Build, exe: *std.Build.Step.Compile) void {
     exe.addLibraryPath(.{
         .cwd_relative = "/opt/cuda/lib64/",
     });
@@ -16,21 +18,9 @@ pub fn link_cuda(b: *std.Build, exe: *std.Build.Step.Compile) void{
     exe.linkSystemLibrary("cudart");
 }
 
-
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-
-    const gen_step = b.addWriteFiles();
-    const stbiw_translate_c = b.addTranslateC(.{
-        .root_source_file = b.path("external/stb_image_write.h"),
-        .target = target,
-        .optimize = optimize,
-    });
-    const stbiw_mod = stbiw_translate_c.createModule();
-    const stbiw_c_path = gen_step.add("stb_image_write.c", "#define STB_IMAGE_WRITE_IMPLEMENTATION\n#include \"stb_image_write.h\"\n");
-    stbiw_mod.addCSourceFile(.{ .file = stbiw_c_path });
-    stbiw_mod.addIncludePath(b.path("external"));
 
     const raylib_translate = b.addTranslateC(.{
         .root_source_file = b.path("external/raylib-5.5_linux_amd64/include/raylib.h"),
@@ -39,13 +29,6 @@ pub fn build(b: *std.Build) void {
     });
     const raylib_mod = raylib_translate.createModule();
 
-    const raycast_o = "build/raycast.o";
-    const add_o     = "build/add.o";
-    const cuda_steps = [_]*std.Build.Step{
-        compile_cuda(b, "cuda/raycast.cu", raycast_o),
-        compile_cuda(b, "cuda/add.cu", add_o),
-    };
-
     const exe = b.addExecutable(.{
         .name = "main",
         .root_module = b.createModule(
@@ -53,22 +36,21 @@ pub fn build(b: *std.Build) void {
         ),
     });
 
-    exe.root_module.addImport("stb_image_write", stbiw_mod);
     exe.root_module.addImport("raylib", raylib_mod);
     exe.addLibraryPath(b.path("external/raylib-5.5_linux_amd64/lib/"));
     exe.linkSystemLibrary("raylib");
     exe.linkLibC();
     link_cuda(b, exe);
 
-    for (cuda_steps) |s| exe.step.dependOn(s);
-    exe.addObjectFile(b.path(raycast_o));
-    exe.addObjectFile(b.path(add_o));
+    const raycast_o = compile_cuda(b, "cuda/raycast.cu", "build/raycast.o");
+    const add_o = compile_cuda(b, "cuda/add.cu", "build/add.o");
+    exe.addObjectFile(raycast_o);
+    exe.addObjectFile(add_o);
 
     b.installArtifact(exe);
 
     const run_exe = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run the application");
-
     run_step.dependOn(&run_exe.step);
 
     const test_exe = b.addTest(.{
@@ -81,9 +63,8 @@ pub fn build(b: *std.Build) void {
     test_exe.linkLibC();
     link_cuda(b, test_exe);
 
-    for (cuda_steps) |s| test_exe.step.dependOn(s);
-    test_exe.addObjectFile(b.path(raycast_o));
-    test_exe.addObjectFile(b.path(add_o));
+    test_exe.addObjectFile(raycast_o);
+    test_exe.addObjectFile(add_o);
 
     const test_step = b.step("test", "Run all tests");
     const run_tests = b.addRunArtifact(test_exe);
