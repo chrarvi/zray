@@ -65,6 +65,7 @@ typedef struct {
     TensorView<uint32_t, 1> mesh_ids;
     TensorView<Mesh, 1> meshes;
     TensorView<Material, 1> materials;
+    TensorView<BLASMeshInfo, 1> blas_meshinfo;
     TensorView<BVHNode, 1> blas_nodes;
     TensorView<uint32_t, 1> blas_prim_indices;
     TensorView<BVHNode, 1> tlas_nodes;
@@ -172,12 +173,14 @@ __device__ bool ray_aabb_hit(const Ray* ray, const AABB* box) {
     return (t_close <= t_far) && (t_far >= 0.0f);
 }
 
-__device__ bool ray_bvh_hit(TensorView<BVHNode, 1> blas_nodes,
+__device__ bool ray_bvh_hit(TensorView<BLASMeshInfo, 1> blas_meshinfo,
+                            TensorView<BVHNode, 1> blas_nodes,
                             TensorView<uint32_t, 1> blas_prim_indices,
                             TensorView<BVHNode, 1> tlas_nodes,
                             TensorView<uint32_t, 1> tlas_prim_indices,
-                            TensorView<uint32_t, 1> mesh_ids, TensorView<Mesh, 1> meshes,
-                            Ray const* ray, VertexBuffers const* vb,
+                            TensorView<uint32_t, 1> mesh_ids,
+                            TensorView<Mesh, 1> meshes, Ray const* ray,
+                            VertexBuffers const* vb,
                             TensorView<uint32_t, 1> indices, float ray_tmin,
                             float ray_tmax, HitRecord* out) {
     float t_closest = ray_tmax;
@@ -211,7 +214,8 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> blas_nodes,
                 uint32_t mesh_id = mesh_ids.at(i0);
                 Mesh* mesh = &meshes.at(mesh_id);
 
-                vec4 ray_o_h = {ray->origin.x, ray->origin.y, ray->origin.z, 1.0};
+                vec4 ray_o_h = {ray->origin.x, ray->origin.y, ray->origin.z,
+                                1.0};
                 vec4 ray_d_h = {ray->dir.x, ray->dir.y, ray->dir.z, 0.0};
                 vec4 ray_o_model = mat4_lmmul(mesh->inv_model, ray_o_h);
                 vec4 ray_d_model = mat4_lmmul(mesh->inv_model, ray_d_h);
@@ -221,8 +225,8 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> blas_nodes,
                 };
 
                 HitRecord tris_hit;
-                if (ray_triangle_hit(p0, p1, p2, &ray_model, ray_tmin, t_closest,
-                                     &tris_hit)) {
+                if (ray_triangle_hit(p0, p1, p2, &ray_model, ray_tmin,
+                                     t_closest, &tris_hit)) {
                     hit_anything = true;
                     t_closest = tris_hit.t;
 
@@ -474,11 +478,11 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, Scene* scene,
         // }
 
         HitRecord bvh_hitrec;
-        if (ray_bvh_hit(scene->blas_nodes, scene->blas_prim_indices,
-                        scene->tlas_nodes, scene->tlas_prim_indices,
-                        scene->mesh_ids, scene->meshes,
-                        &current_ray, &scene->vb, scene->indices, 0.001f, tmax,
-                        &bvh_hitrec)) {
+        if (ray_bvh_hit(scene->blas_meshinfo, scene->blas_nodes,
+                        scene->blas_prim_indices, scene->tlas_nodes,
+                        scene->tlas_prim_indices, scene->mesh_ids,
+                        scene->meshes, &current_ray, &scene->vb, scene->indices,
+                        0.001f, tmax, &bvh_hitrec)) {
             const uint32_t mesh_idx = scene->mesh_ids.at(bvh_hitrec.i0);
             const Mesh* mesh = &scene->meshes.at(mesh_idx);
             bvh_hitrec.material = scene->materials.at(mesh->material_idx);
@@ -591,7 +595,9 @@ EXTERN_C void launch_raycast(
     TensorView<float, 2> d_vb_pos, TensorView<float, 2> d_vb_color,
     TensorView<float, 2> d_vb_norm, TensorView<uint32_t, 1> d_indices,
     TensorView<uint32_t, 1> d_mesh_ids, TensorView<Mesh, 1> d_meshes,
-    TensorView<Material, 1> d_materials, TensorView<BVHNode, 1> d_blas_nodes,
+    TensorView<Material, 1> d_materials,
+    TensorView<BLASMeshInfo, 1> d_blas_meshinfo,
+    TensorView<BVHNode, 1> d_blas_nodes,
     TensorView<uint32_t, 1> d_blas_prim_indices,
     TensorView<BVHNode, 1> d_tlas_nodes,
     TensorView<uint32_t, 1> d_tlas_prim_indices, unsigned int frame_idx,
@@ -615,6 +621,7 @@ EXTERN_C void launch_raycast(
                         .mesh_ids = d_mesh_ids,
                         .meshes = d_meshes,
                         .materials = d_materials,
+                        .blas_meshinfo = d_blas_meshinfo,
                         .blas_nodes = d_blas_nodes,
                         .blas_prim_indices = d_blas_prim_indices,
                         .tlas_nodes = d_tlas_nodes,

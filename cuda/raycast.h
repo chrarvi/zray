@@ -75,6 +75,13 @@ typedef struct {
 } Mesh;
 
 typedef struct {
+    unsigned int node_offset;  // first node in the global buffer
+    unsigned int node_count;   // number of nodes for the associated mesh
+    unsigned int prim_offset;  // first primitive index in global prim buffer
+    unsigned int prim_count;   // number of primitives
+} BLASMeshInfo;
+
+typedef struct {
     AABB box; // 24 bytes
     union {
         int left_idx;

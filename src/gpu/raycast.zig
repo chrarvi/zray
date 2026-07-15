@@ -7,6 +7,7 @@ pub const Material = rc.Material;
 pub const Mesh = rc.Mesh;
 pub const AABB = rc.AABB;
 pub const BVHNode = rc.BVHNode;
+pub const BLASMeshInfo = rc.BLASMeshInfo;
 
 pub const MaterialKind = struct {
     pub const Lambertian = rc.MAT_LAMBERTIAN;
@@ -31,6 +32,7 @@ pub extern fn launch_raycast(
     d_mesh_ids: cu.TensorView(u32, 1),
     d_meshes: cu.TensorView(Mesh, 1),
     d_materials: cu.TensorView(Material, 1),
+    d_blas_meshinfo: cu.TensorView(BLASMeshInfo, 1),
     d_blas_nodes: cu.TensorView(BVHNode, 1),
     d_blas_prim_indices: cu.TensorView(u32, 1),
     d_tlas_nodes: cu.TensorView(BVHNode, 1),

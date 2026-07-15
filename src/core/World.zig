@@ -12,9 +12,9 @@ tlas: core.TLASBuilder,
 
 pub fn init(allocator: std.mem.Allocator) !World {
     return .{
-        .spheres = std.ArrayList(rc.Sphere).init(allocator),
+        .spheres = try std.ArrayList(rc.Sphere).initCapacity(allocator, 0),
         .mesh_atlas = core.MeshAtlas.init(allocator),
-        .materials = std.ArrayList(rc.Material).init(allocator),
+        .materials = try std.ArrayList(rc.Material).initCapacity(allocator, 0),
         .blas = core.BLASBuilder.init(allocator),
         .tlas = core.TLASBuilder.init(allocator),
     };

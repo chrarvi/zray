@@ -92,6 +92,7 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
             try wd.mesh_ids.view(1, .{shared.world.mesh_atlas.mesh_ids.items.len}),
             try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
             try wd.materials.view(1, .{shared.world.materials.items.len}),
+            try wd.blas_meshinfo.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
             try wd.blas_nodes.view(1, .{std.math.pow(u32, 2, shared.blas_max_depth + 1) - 1}),
             try wd.blas_prim_indices.view(1, .{shared.world.blas.prim_indices.items.len}),
             try wd.tlas_nodes.view(1, .{std.math.pow(u32, 2, shared.tlas_max_depth + 1) - 1}),

@@ -3,7 +3,7 @@ const rc = @import("raycast.zig");
 const cu = @import("cuda.zig");
 const gpu = @import("gpu.zig");
 
-const HostBVH = @import("../core/bvh.zig").BLASBuilder;
+const HostBLAS = @import("../core/bvh.zig").BLASBuilder;
 
 const DeviceWorld = @This();
 
@@ -14,6 +14,7 @@ mesh_ids: cu.CudaBuffer(u32),
 meshes: cu.CudaBuffer(rc.Mesh),
 partial_aabb: cu.CudaBuffer(rc.AABB),
 materials: cu.CudaBuffer(rc.Material),
+blas_meshinfo: cu.CudaBuffer(rc.BLASMeshInfo),
 blas_nodes: cu.CudaBuffer(rc.BVHNode),
 blas_prim_indices: cu.CudaBuffer(u32),
 tlas_nodes: cu.CudaBuffer(rc.BVHNode),
@@ -35,6 +36,7 @@ pub fn init(spheres_capacity: usize, vertex_capacity: usize, indices_capactity: 
         .materials = try cu.CudaBuffer(rc.Material).init(materials_capacity),
 
         .partial_aabb = try cu.CudaBuffer(rc.AABB).init(mesh_capacity*128),
+        .blas_meshinfo = try cu.CudaBuffer(rc.BLASMeshInfo).init(mesh_capacity),
         .blas_nodes = try cu.CudaBuffer(rc.BVHNode).init(blas_size),
         .blas_prim_indices = try cu.CudaBuffer(u32).init(vertex_capacity / 3),
         .tlas_nodes = try cu.CudaBuffer(rc.BVHNode).init(tlas_size),
@@ -50,11 +52,15 @@ pub fn deinit(self: *DeviceWorld) void {
     self.meshes.deinit();
     self.materials.deinit();
     self.partial_aabb.deinit();
+    self.blas_meshinfo.deinit();
     self.blas_nodes.deinit();
     self.blas_prim_indices.deinit();
+    self.tlas_nodes.deinit();
+    self.tlas_prim_indices.deinit();
 }
 
-pub fn bvh_to_device(self: *DeviceWorld, host: *const HostBVH, alloc: std.mem.Allocator) !void {
+
+pub fn bvh_to_device(self: *DeviceWorld, host: *const HostBLAS, alloc: std.mem.Allocator) !void {
     var temp_buffer = try std.ArrayList(rc.BVHNode).initCapacity(alloc, host.nodes.items.len);
     defer temp_buffer.deinit();
 
