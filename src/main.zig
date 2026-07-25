@@ -186,6 +186,53 @@ pub fn setup_box_scene(
     });
 }
 
+// --- Debug AABB overlay helpers ---
+
+// Project a world-space point to screen coordinates using the same camera
+// convention as the CUDA ray generation. Returns null if the point is behind
+// the camera.
+fn project_point(proj: al.Mat4, world_to_cam: al.Mat4, w: f32, h: f32, p: al.Vec3) ?rl.Vector2 {
+    const cam = al.transform_pos(world_to_cam, p); // rigid transform, w == 1
+    const clip_x = proj[0][0] * cam.x + proj[0][1] * cam.y + proj[0][2] * cam.z + proj[0][3];
+    const clip_y = proj[1][0] * cam.x + proj[1][1] * cam.y + proj[1][2] * cam.z + proj[1][3];
+    const clip_w = proj[3][0] * cam.x + proj[3][1] * cam.y + proj[3][2] * cam.z + proj[3][3];
+    if (clip_w <= 1e-6) return null; // at or behind the camera plane
+    const ndc_x = clip_x / clip_w;
+    const ndc_y = clip_y / clip_w;
+    return rl.Vector2{
+        .x = (ndc_x + 1.0) * 0.5 * w,
+        .y = (1.0 - ndc_y) * 0.5 * h,
+    };
+}
+
+// Draw the 12 edges of an axis-aligned box (given in the space of `model`).
+fn draw_wire_box(proj: al.Mat4, world_to_cam: al.Mat4, w: f32, h: f32, model: al.Mat4, bmin: al.Vec3, bmax: al.Vec3, color: rl.Color) void {
+    const corners = [8]al.Vec3{
+        .{ .x = bmin.x, .y = bmin.y, .z = bmin.z },
+        .{ .x = bmax.x, .y = bmin.y, .z = bmin.z },
+        .{ .x = bmax.x, .y = bmax.y, .z = bmin.z },
+        .{ .x = bmin.x, .y = bmax.y, .z = bmin.z },
+        .{ .x = bmin.x, .y = bmin.y, .z = bmax.z },
+        .{ .x = bmax.x, .y = bmin.y, .z = bmax.z },
+        .{ .x = bmax.x, .y = bmax.y, .z = bmax.z },
+        .{ .x = bmin.x, .y = bmax.y, .z = bmax.z },
+    };
+    var pts: [8]?rl.Vector2 = undefined;
+    for (corners, 0..) |c, i| {
+        pts[i] = project_point(proj, world_to_cam, w, h, al.transform_pos(model, c));
+    }
+    const edges = [_][2]usize{
+        .{ 0, 1 }, .{ 1, 2 }, .{ 2, 3 }, .{ 3, 0 }, // near face
+        .{ 4, 5 }, .{ 5, 6 }, .{ 6, 7 }, .{ 7, 4 }, // far face
+        .{ 0, 4 }, .{ 1, 5 }, .{ 2, 6 }, .{ 3, 7 }, // connecting edges
+    };
+    for (edges) |e| {
+        const a = pts[e[0]] orelse continue;
+        const b = pts[e[1]] orelse continue;
+        rl.DrawLineV(a, b, color);
+    }
+}
+
 pub fn main() !void {
     var gpa = std.heap.page_allocator;
 
@@ -282,6 +329,13 @@ pub fn main() !void {
     rl.SetTargetFPS(RENDERING_FRAMERATE);
     rl.DisableCursor();
 
+    // Debug overlay state.
+    var draw_aabb = false;
+    var blas_draw_depth: u32 = 6;
+    var sim_fps: f64 = 0;
+    var last_sim_frames: usize = 0;
+    var last_fps_time: f64 = rl.GetTime();
+
     while (!rl.WindowShouldClose()) {
         const idx = shared.ready_idx.load(.acquire);
         const buf = shared.frame_buffers_host[idx];
@@ -300,6 +354,11 @@ pub fn main() !void {
             if (rl.IsKeyDown(rl.KEY_D)) camera.move(.Right);
         }
 
+        // Debug overlay controls.
+        if (rl.IsKeyPressed(rl.KEY_B)) draw_aabb = !draw_aabb;
+        if (rl.IsKeyPressed(rl.KEY_RIGHT_BRACKET)) blas_draw_depth += 1;
+        if (rl.IsKeyPressed(rl.KEY_LEFT_BRACKET) and blas_draw_depth > 0) blas_draw_depth -= 1;
+
         if (rl.IsKeyPressed(rl.KEY_P)) {
             rc.launch_clear_buffer(try shared.frame_buffer_dev_accum.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }));
             shared.cam.temporal_averaging = !shared.cam.temporal_averaging;
@@ -315,9 +374,59 @@ pub fn main() !void {
         }
         shared.cam.camera_to_world = camera.camera_to_world();
 
+        // Sample the simulation frame rate roughly twice a second.
+        const now_t = rl.GetTime();
+        if (now_t - last_fps_time >= 0.5) {
+            const cur = shared.sim_frames.load(.monotonic);
+            sim_fps = @as(f64, @floatFromInt(cur - last_sim_frames)) / (now_t - last_fps_time);
+            last_sim_frames = cur;
+            last_fps_time = now_t;
+        }
+
         rl.BeginDrawing();
         rl.ClearBackground(rl.RAYWHITE);
         rl.DrawTexture(texture, 0, 0, rl.WHITE);
+
+        if (draw_aabb) {
+            const fw: f32 = @floatFromInt(image_width);
+            const fh: f32 = @floatFromInt(image_height);
+            const c2w = camera.camera_to_world();
+            if (al.mat4_inverse(c2w)) |w2c| {
+                // TLAS instance boxes (already in world space) in green.
+                for (world.tlas.nodes.items) |node| {
+                    draw_wire_box(camera.proj, w2c, fw, fh, al.mat4_ident(), node.box.min, node.box.max, rl.GREEN);
+                }
+                // Per-mesh BLAS boxes (model space -> transformed by the mesh
+                // model matrix), limited to blas_draw_depth, in red.
+                for (world.blas.meshinfo.items, 0..) |info, mesh_i| {
+                    const model = world.mesh_atlas.meshes.items[mesh_i].model;
+                    const start: usize = @intCast(info.node_offset);
+                    const end: usize = start + @as(usize, @intCast(info.node_count));
+                    for (world.blas.nodes.items[start..end]) |node| {
+                        if (node.depth > blas_draw_depth) continue;
+                        draw_wire_box(camera.proj, w2c, fw, fh, model, node.box.min, node.box.max, rl.RED);
+                    }
+                }
+            }
+        }
+
+        // Telemetry overlay.
+        const render_fps = rl.GetFPS();
+        const intersections = shared.last_intersections.load(.monotonic);
+        var buf_txt: [160]u8 = undefined;
+        const txt = std.fmt.bufPrintZ(&buf_txt, "render {d} fps | sim {d:.1} fps | tests {d:.2} M", .{
+            render_fps,
+            sim_fps,
+            @as(f64, @floatFromInt(intersections)) / 1.0e6,
+        }) catch unreachable;
+        rl.DrawRectangle(5, 5, 560, 52, rl.Color{ .r = 0, .g = 0, .b = 0, .a = 160 });
+        rl.DrawText(txt.ptr, 12, 10, 20, rl.GREEN);
+        if (draw_aabb) {
+            rl.DrawText("[B] AABBs: ON   [ [ / ] ] BLAS depth", 12, 33, 18, rl.RAYWHITE);
+        } else {
+            rl.DrawText("[B] AABBs: OFF", 12, 33, 18, rl.RAYWHITE);
+        }
+
         rl.EndDrawing();
     }
 

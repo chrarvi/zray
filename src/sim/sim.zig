@@ -18,6 +18,10 @@ pub const SimSharedState = struct {
     world: *core.World,
     world_dev: *gpu.DeviceWorld,
     frame_idx: u32,
+    // Debug/telemetry: monotonically increasing count of simulated frames and
+    // the number of BVH intersection tests from the most recent frame.
+    sim_frames: AtomicUsize = AtomicUsize.init(0),
+    last_intersections: AtomicUsize = AtomicUsize.init(0),
 };
 
 pub const Simulator = struct {
@@ -84,6 +88,7 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
         // );
 
 
+        var test_count: u64 = 0;
         rc.launch_raycast(
             try shared.frame_buffer_dev_accum.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }),
             try shared.frame_buffer_dev.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }),
@@ -103,8 +108,12 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
             try wd.tlas_prim_indices.view(1, .{shared.world.tlas.prim_indices.items.len}),
             shared.frame_idx,
             shared.cam.temporal_averaging,
+            &test_count,
         );
         try shared.frame_buffer_dev.toHost(shared.frame_buffers_host[write_idx]);
+
+        shared.last_intersections.store(@intCast(test_count), .monotonic);
+        _ = shared.sim_frames.fetchAdd(1, .monotonic);
 
         shared.ready_idx.store(write_idx, .release);
         shared.frame_idx += 1;

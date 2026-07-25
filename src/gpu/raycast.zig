@@ -39,6 +39,7 @@ pub extern fn launch_raycast(
     d_tlas_prim_indices: cu.TensorView(u32, 1),
     frame_idx: u32,
     temporal_averaging: bool,
+    out_test_count: *u64,
 ) void;
 
 pub extern fn model_to_world(

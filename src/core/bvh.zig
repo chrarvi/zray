@@ -50,6 +50,9 @@ pub const BVHNode = struct {
     // Absolute offset into the builder's prim_indices buffer.
     prims_offset: u32,
     prims_count: u32,
+    // Depth of this node within its tree (root = 0). Host-only; used for debug
+    // visualization. Not uploaded to the device.
+    depth: u32 = 0,
 };
 
 pub const BLASBuilder = struct {
@@ -105,6 +108,7 @@ pub const BLASBuilder = struct {
         root.prims_offset = @intCast(prim_offset);
         root.prims_count = @intCast(n_tris);
         root.left_idx = -1;
+        root.depth = 0;
         self.update_node_aabb(atlas, root);
 
         try self.subdivide(atlas, root, 1, max_depth);
@@ -160,14 +164,17 @@ pub const BLASBuilder = struct {
         const left_count: u32 = i - node.prims_offset;
         if ((left_count == 0) or (left_count == node.prims_count)) return;
 
+        const child_depth = node.depth + 1;
         const left_child_idx = self.nodes.items.len;
         var left_node = try self.nodes.addOne();
         left_node.prims_offset = node.prims_offset;
         left_node.prims_count = left_count;
+        left_node.depth = child_depth;
 
         var right_node = try self.nodes.addOne();
         right_node.prims_offset = i;
         right_node.prims_count = node.prims_count - left_count;
+        right_node.depth = child_depth;
 
         node.left_idx = @as(i32, @intCast(left_child_idx));
         node.prims_count = 0; // turns it into an internal node
@@ -213,6 +220,7 @@ pub const TLASBuilder = struct {
         root.prims_offset = 0;
         root.prims_count = @as(u32, @intCast(n_prims));
         root.left_idx = -1;
+        root.depth = 0;
         self.update_node_aabb(atlas, root);
 
         try self.subdivide(atlas, root, 1, max_depth);
@@ -273,14 +281,17 @@ pub const TLASBuilder = struct {
         const left_count: u32 = i - node.prims_offset;
         if ((left_count == 0) or (left_count == node.prims_count)) return;
 
+        const child_depth = node.depth + 1;
         const left_child_idx = self.nodes.items.len;
         var left_node = try self.nodes.addOne();
         left_node.prims_offset = node.prims_offset;
         left_node.prims_count = left_count;
+        left_node.depth = child_depth;
 
         var right_node = try self.nodes.addOne();
         right_node.prims_offset = i;
         right_node.prims_count = node.prims_count - left_count;
+        right_node.depth = child_depth;
 
         node.left_idx = @as(i32, @intCast(left_child_idx));
         node.prims_count = 0; // turns it into an internal node

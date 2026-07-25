@@ -176,6 +176,10 @@ __device__ bool ray_aabb_hit(const Ray* ray, const AABB* box, float* t_near) {
     return (t_close <= t_far) && (t_far >= 0.0f);
 }
 
+// Debug: total number of ray/AABB and ray/triangle intersection tests performed
+// during a launch. Threads accumulate locally and do a single atomicAdd.
+__device__ unsigned long long g_test_count;
+
 // Intersect a single mesh instance's BLAS in that mesh's model space.
 // `ray_model` is the world ray transformed by mesh->inv_model (direction left
 // UN-normalized so that the ray parameter t is identical in world and model
@@ -185,7 +189,7 @@ __device__ bool blas_hit(const BLASMeshInfo* info, TensorView<BVHNode, 1> blas_n
                          TensorView<uint32_t, 1> blas_prim_indices,
                          VertexBuffers const* vb, TensorView<uint32_t, 1> indices,
                          Ray const* ray_model, float ray_tmin, float* t_closest,
-                         HitRecord* out) {
+                         HitRecord* out, unsigned long long* nt) {
     bool hit_anything = false;
 
     // Stack entries carry the box entry distance so we can discard a node whose
@@ -216,6 +220,7 @@ __device__ bool blas_hit(const BLASMeshInfo* info, TensorView<BVHNode, 1> blas_n
                 vec3 p2 = tv_get_vec3(vb->pos, i2);
 
                 HitRecord tris_hit;
+                (*nt)++;
                 if (ray_triangle_hit(p0, p1, p2, ray_model, ray_tmin, *t_closest,
                                      &tris_hit)) {
                     hit_anything = true;
@@ -241,6 +246,7 @@ __device__ bool blas_hit(const BLASMeshInfo* info, TensorView<BVHNode, 1> blas_n
             int left = node->lp.left_idx;
             int right = node->lp.left_idx + 1;
             float t_left, t_right;
+            (*nt) += 2;
             bool hit_left = ray_aabb_hit(ray_model, &blas_nodes.at(left).box, &t_left) &&
                             t_left <= *t_closest;
             bool hit_right = ray_aabb_hit(ray_model, &blas_nodes.at(right).box, &t_right) &&
@@ -279,7 +285,7 @@ __device__ bool ray_bvh_hit(TensorView<BLASMeshInfo, 1> blas_meshinfo,
                             TensorView<Mesh, 1> meshes, Ray const* ray,
                             VertexBuffers const* vb,
                             TensorView<uint32_t, 1> indices, float ray_tmin,
-                            float ray_tmax, HitRecord* out) {
+                            float ray_tmax, HitRecord* out, unsigned long long* nt) {
     float t_closest = ray_tmax;
     bool hit_anything = false;
 
@@ -316,7 +322,7 @@ __device__ bool ray_bvh_hit(TensorView<BLASMeshInfo, 1> blas_meshinfo,
 
                 HitRecord blas_rec;
                 if (blas_hit(info, blas_nodes, blas_prim_indices, vb, indices,
-                             &ray_model, ray_tmin, &t_closest, &blas_rec)) {
+                             &ray_model, ray_tmin, &t_closest, &blas_rec, nt)) {
                     hit_anything = true;
 
                     // Bring the hit back to world space. Because t is preserved,
@@ -343,6 +349,7 @@ __device__ bool ray_bvh_hit(TensorView<BLASMeshInfo, 1> blas_meshinfo,
             int left = node->lp.left_idx;
             int right = node->lp.left_idx + 1;
             float t_left, t_right;
+            (*nt) += 2;
             bool hit_left = ray_aabb_hit(ray, &tlas_nodes.at(left).box, &t_left) &&
                             t_left <= t_closest;
             bool hit_right = ray_aabb_hit(ray, &tlas_nodes.at(right).box, &t_right) &&
@@ -544,7 +551,7 @@ __device__ ScatterResult scatter_material(const Material& mat,
 }
 
 __device__ vec3 ray_color(const Ray& ray, int max_depth, Scene* scene,
-                          curandState* local_state) {
+                          curandState* local_state, unsigned long long* nt) {
     Ray current_ray = ray;
     vec3 throughput = {1.0f, 1.0f, 1.0f};
     vec3 accum = {0.0f, 0.0f, 0.0f};
@@ -575,7 +582,7 @@ __device__ vec3 ray_color(const Ray& ray, int max_depth, Scene* scene,
                         scene->blas_prim_indices, scene->tlas_nodes,
                         scene->tlas_prim_indices, scene->mesh_ids,
                         scene->meshes, &current_ray, &scene->vb, scene->indices,
-                        0.001f, tmax, &bvh_hitrec)) {
+                        0.001f, tmax, &bvh_hitrec, nt)) {
             const uint32_t mesh_idx = scene->mesh_ids.at(bvh_hitrec.i0);
             const Mesh* mesh = &scene->meshes.at(mesh_idx);
             bvh_hitrec.material = scene->materials.at(mesh->material_idx);
@@ -619,6 +626,7 @@ __global__ void render_kernel(TensorView<float, 3> d_img_accum,
     curandState* local_state = &rng_state[y * cam->image_width + x];
     vec3 color = {0.0f, 0.0f, 0.0f};
 
+    unsigned long long tests = 0;
     for (size_t sample = 0u; sample < cam->samples_per_pixel; ++sample) {
         vec3 offset = sample_square(local_state);
         float ndc_x = ((x + offset.x) / (float)cam->image_width) * 2.0f - 1.0f;
@@ -642,10 +650,11 @@ __global__ void render_kernel(TensorView<float, 3> d_img_accum,
             .dir = normalize({dir_world4.x, dir_world4.y, dir_world4.z}),
         };
 
-        color = color + ray_color(ray, cam->max_depth, &scene, local_state);
+        color = color + ray_color(ray, cam->max_depth, &scene, local_state, &tests);
     }
 
     color = color / (float)cam->samples_per_pixel;
+    atomicAdd(&g_test_count, tests);
 
     // --- Temporal accumulation ---
     vec3 prev = vec3{d_img_accum.at(y, x, 0), d_img_accum.at(y, x, 1),
@@ -694,7 +703,7 @@ EXTERN_C void launch_raycast(
     TensorView<uint32_t, 1> d_blas_prim_indices,
     TensorView<BVHNode, 1> d_tlas_nodes,
     TensorView<uint32_t, 1> d_tlas_prim_indices, unsigned int frame_idx,
-    bool temporal_averaging) {
+    bool temporal_averaging, unsigned long long* out_test_count) {
     // d_img: height, width 3
     // d_spheres: n_spheres
     // d_vb_pos: n_vertex, 3
@@ -724,10 +733,18 @@ EXTERN_C void launch_raycast(
     dim3 grid((cam->image_width + block.x - 1) / block.x,
               (cam->image_height + block.y - 1) / block.y);
 
+    unsigned long long zero = 0;
+    CHECK_CUDA(cudaMemcpyToSymbol(g_test_count, &zero, sizeof(zero)));
+
     render_kernel<<<grid, block>>>(d_img_accum, d_img, cam, scene, d_rng_state,
                                    frame_idx, temporal_averaging);
     CHECK_CUDA(cudaPeekAtLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
+
+    if (out_test_count != nullptr) {
+        CHECK_CUDA(cudaMemcpyFromSymbol(out_test_count, g_test_count,
+                                        sizeof(*out_test_count)));
+    }
 }
 
 __global__ void clear_buffer(TensorView<float, 3> d_buf) {
