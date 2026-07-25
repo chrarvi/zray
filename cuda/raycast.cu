@@ -157,8 +157,10 @@ __device__ bool ray_triangle_hit(const vec3 p1, const vec3 p2, const vec3 p3,
     return true;
 }
 
-// SLAB aabb intersection test
-__device__ bool ray_aabb_hit(const Ray* ray, const AABB* box) {
+// SLAB aabb intersection test. On hit, writes the ray parameter at which the
+// ray enters the box (clamped to >= 0) to *t_near, so the BVH traversal can
+// order children front-to-back and prune boxes that lie beyond the closest hit.
+__device__ bool ray_aabb_hit(const Ray* ray, const AABB* box, float* t_near) {
     vec3 recip_dir = 1.0f / ray->dir;
 
     vec3 t_low = (box->min - ray->origin) * recip_dir;
@@ -170,6 +172,7 @@ __device__ bool ray_aabb_hit(const Ray* ray, const AABB* box) {
     float t_close = fmaxf(t_vec_close);
     float t_far = fminf(t_vec_far);
 
+    *t_near = fmaxf(t_close, 0.0f);
     return (t_close <= t_far) && (t_far >= 0.0f);
 }
 
@@ -185,16 +188,19 @@ __device__ bool blas_hit(const BLASMeshInfo* info, TensorView<BVHNode, 1> blas_n
                          HitRecord* out) {
     bool hit_anything = false;
 
+    // Stack entries carry the box entry distance so we can discard a node whose
+    // whole box lies beyond the closest hit found so far (t_closest may shrink
+    // after the node was pushed).
     const int MAX_STACK = 64;
-    int stack[MAX_STACK];
+    struct Entry { int idx; float t_near; };
+    Entry stack[MAX_STACK];
     int stack_count = 0;
-    stack[stack_count++] = (int)info->node_offset;  // this mesh's BLAS root
+    stack[stack_count++] = {(int)info->node_offset, ray_tmin};  // this mesh's BLAS root
 
     while (stack_count > 0) {
-        int node_idx = stack[--stack_count];
-        const BVHNode* node = &blas_nodes.at(node_idx);
-
-        if (!ray_aabb_hit(ray_model, &node->box)) continue;
+        Entry entry = stack[--stack_count];
+        if (entry.t_near > *t_closest) continue;  // pruned by a closer hit
+        const BVHNode* node = &blas_nodes.at(entry.idx);
 
         if (node->prims_count > 0) {
             // Leaf: intersect triangles (model space).
@@ -234,10 +240,27 @@ __device__ bool blas_hit(const BLASMeshInfo* info, TensorView<BVHNode, 1> blas_n
         } else {
             int left = node->lp.left_idx;
             int right = node->lp.left_idx + 1;
-            const BVHNode* left_node = &blas_nodes.at(left);
-            const BVHNode* right_node = &blas_nodes.at(right);
-            if (ray_aabb_hit(ray_model, &left_node->box)) stack[stack_count++] = left;
-            if (ray_aabb_hit(ray_model, &right_node->box)) stack[stack_count++] = right;
+            float t_left, t_right;
+            bool hit_left = ray_aabb_hit(ray_model, &blas_nodes.at(left).box, &t_left) &&
+                            t_left <= *t_closest;
+            bool hit_right = ray_aabb_hit(ray_model, &blas_nodes.at(right).box, &t_right) &&
+                             t_right <= *t_closest;
+
+            // Push the farther child first so the nearer one is popped (and gets
+            // to shrink t_closest) first.
+            if (hit_left && hit_right) {
+                if (t_left <= t_right) {
+                    stack[stack_count++] = {right, t_right};
+                    stack[stack_count++] = {left, t_left};
+                } else {
+                    stack[stack_count++] = {left, t_left};
+                    stack[stack_count++] = {right, t_right};
+                }
+            } else if (hit_left) {
+                stack[stack_count++] = {left, t_left};
+            } else if (hit_right) {
+                stack[stack_count++] = {right, t_right};
+            }
         }
     }
 
@@ -261,15 +284,15 @@ __device__ bool ray_bvh_hit(TensorView<BLASMeshInfo, 1> blas_meshinfo,
     bool hit_anything = false;
 
     const int MAX_STACK = 64;
-    int stack[MAX_STACK];
+    struct Entry { int idx; float t_near; };
+    Entry stack[MAX_STACK];
     int stack_count = 0;
-    stack[stack_count++] = 0;  // TLAS root
+    stack[stack_count++] = {0, ray_tmin};  // TLAS root
 
     while (stack_count > 0) {
-        int node_idx = stack[--stack_count];
-        const BVHNode* node = &tlas_nodes.at(node_idx);
-
-        if (!ray_aabb_hit(ray, &node->box)) continue;  // world ray vs world box
+        Entry entry = stack[--stack_count];
+        if (entry.t_near > t_closest) continue;  // pruned by a closer hit
+        const BVHNode* node = &tlas_nodes.at(entry.idx);
 
         if (node->prims_count > 0) {
             // Leaf: mesh instances.
@@ -319,10 +342,24 @@ __device__ bool ray_bvh_hit(TensorView<BLASMeshInfo, 1> blas_meshinfo,
         } else {
             int left = node->lp.left_idx;
             int right = node->lp.left_idx + 1;
-            const BVHNode* left_node = &tlas_nodes.at(left);
-            const BVHNode* right_node = &tlas_nodes.at(right);
-            if (ray_aabb_hit(ray, &left_node->box)) stack[stack_count++] = left;
-            if (ray_aabb_hit(ray, &right_node->box)) stack[stack_count++] = right;
+            float t_left, t_right;
+            bool hit_left = ray_aabb_hit(ray, &tlas_nodes.at(left).box, &t_left) &&
+                            t_left <= t_closest;
+            bool hit_right = ray_aabb_hit(ray, &tlas_nodes.at(right).box, &t_right) &&
+                             t_right <= t_closest;
+            if (hit_left && hit_right) {
+                if (t_left <= t_right) {
+                    stack[stack_count++] = {right, t_right};
+                    stack[stack_count++] = {left, t_left};
+                } else {
+                    stack[stack_count++] = {left, t_left};
+                    stack[stack_count++] = {right, t_right};
+                }
+            } else if (hit_left) {
+                stack[stack_count++] = {left, t_left};
+            } else if (hit_right) {
+                stack[stack_count++] = {right, t_right};
+            }
         }
     }
 
