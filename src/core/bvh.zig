@@ -1,13 +1,5 @@
 /// BVH implementation.
 /// Translated from https://jacco.ompf2.com/2022/04/13/how-to-build-a-bvh-part-1-basics/
-///
-/// Two-level acceleration structure:
-///   * BLASBuilder builds one BVH per mesh in that mesh's *model* space. All
-///     meshes' nodes are concatenated into a single `nodes` buffer; each mesh's
-///     sub-range is described by an entry in `meshinfo` (see rc.BLASMeshInfo).
-///   * TLASBuilder builds a single BVH over the mesh instances in *world* space
-///     (i.e. after each mesh's model transform has been applied). Its leaves
-///     reference mesh indices via `prim_indices`.
 const al = @import("linalg.zig");
 const core = @import("core.zig");
 const rc = @import("../gpu/raycast.zig");
@@ -39,21 +31,111 @@ const AABB = struct {
     pub fn center(self: *const AABB) al.Vec3 {
         return self.max.add(self.min).divc(2.0);
     }
+    // Surface area; 0 for an empty (never-extended) box.
+    pub fn area(self: *const AABB) f32 {
+        const e = self.extent();
+        if (e.x < 0.0 or e.y < 0.0 or e.z < 0.0) return 0.0;
+        return 2.0 * (e.x * e.y + e.y * e.z + e.z * e.x);
+    }
 };
 
 pub const BVHNode = struct {
     box: AABB,
-    // For an internal node (prims_count == 0) this is the absolute index of the
-    // left child in the shared node buffer (right child is left_idx + 1).
-    // For a leaf it is unused (-1); leaves use prims_offset/prims_count.
     left_idx: i32 = -1,
-    // Absolute offset into the builder's prim_indices buffer.
     prims_offset: u32,
     prims_count: u32,
-    // Depth of this node within its tree (root = 0). Host-only; used for debug
-    // visualization. Not uploaded to the device.
     depth: u32 = 0,
 };
+
+const SAH_BINS = 12;
+
+const Split = struct {
+    axis: u32,
+    pos: f32,
+    cost: f32,
+};
+
+fn find_best_split(
+    prim_indices: []const u32,
+    first: u32,
+    count: u32,
+    boxes: []const AABB,
+    centroids: []const al.Vec3,
+) ?Split {
+    var best: ?Split = null;
+
+    var axis: u32 = 0;
+    while (axis < 3) : (axis += 1) {
+        // Bounds of the centroids along this axis.
+        var cmin: f32 = std.math.inf(f32);
+        var cmax: f32 = -std.math.inf(f32);
+        var k: u32 = 0;
+        while (k < count) : (k += 1) {
+            const c = centroids[prim_indices[first + k]].get(axis);
+            cmin = @min(cmin, c);
+            cmax = @max(cmax, c);
+        }
+        if (cmax - cmin < 1e-12) continue; // no spread: can't split on this axis
+
+        // Bin the primitives by centroid.
+        var bin_box: [SAH_BINS]AABB = undefined;
+        var bin_count: [SAH_BINS]u32 = undefined;
+        for (0..SAH_BINS) |b| {
+            bin_box[b] = AABB.empty();
+            bin_count[b] = 0;
+        }
+        const scale: f32 = @as(f32, SAH_BINS) / (cmax - cmin);
+        k = 0;
+        while (k < count) : (k += 1) {
+            const id = prim_indices[first + k];
+            var b: usize = @intFromFloat((centroids[id].get(axis) - cmin) * scale);
+            if (b >= SAH_BINS) b = SAH_BINS - 1;
+            bin_count[b] += 1;
+            bin_box[b].merge(&boxes[id]);
+        }
+
+        // Sweep to accumulate left/right area*count for each of the BINS-1 planes.
+        var left_area: [SAH_BINS - 1]f32 = undefined;
+        var right_area: [SAH_BINS - 1]f32 = undefined;
+        var left_count: [SAH_BINS - 1]u32 = undefined;
+        var right_count: [SAH_BINS - 1]u32 = undefined;
+
+        var lbox = AABB.empty();
+        var lcount: u32 = 0;
+        for (0..SAH_BINS - 1) |i| {
+            lcount += bin_count[i];
+            lbox.merge(&bin_box[i]);
+            left_count[i] = lcount;
+            left_area[i] = lbox.area();
+        }
+        var rbox = AABB.empty();
+        var rcount: u32 = 0;
+        var i: usize = SAH_BINS - 1;
+        while (i > 0) : (i -= 1) {
+            rcount += bin_count[i];
+            rbox.merge(&bin_box[i]);
+            right_count[i - 1] = rcount;
+            right_area[i - 1] = rbox.area();
+        }
+
+        const bin_w = (cmax - cmin) / @as(f32, SAH_BINS);
+        for (0..SAH_BINS - 1) |plane| {
+            // Skip degenerate planes that leave one side empty.
+            if (left_count[plane] == 0 or right_count[plane] == 0) continue;
+            const cost = @as(f32, @floatFromInt(left_count[plane])) * left_area[plane] +
+                @as(f32, @floatFromInt(right_count[plane])) * right_area[plane];
+            if (best == null or cost < best.?.cost) {
+                best = .{
+                    .axis = axis,
+                    .pos = cmin + bin_w * @as(f32, @floatFromInt(plane + 1)),
+                    .cost = cost,
+                };
+            }
+        }
+    }
+
+    return best;
+}
 
 pub const BLASBuilder = struct {
     const Self = @This();
@@ -79,12 +161,32 @@ pub const BLASBuilder = struct {
     }
 
     pub fn build(self: *Self, atlas: *const core.MeshAtlas, max_depth: u32) !void {
+        const alloc = self.nodes.allocator;
+
+        // Precompute per-triangle model-space box + centroid once, indexed by
+        // global triangle index.
+        const n_tris_total = atlas.num_triangles();
+        const boxes = try alloc.alloc(AABB, n_tris_total);
+        defer alloc.free(boxes);
+        const centroids = try alloc.alloc(al.Vec3, n_tris_total);
+        defer alloc.free(centroids);
+        for (0..n_tris_total) |t| {
+            // get_triangle returns model-space (untransformed) positions.
+            const tri = atlas.get_triangle(t).?;
+            var b = AABB.empty();
+            b.extend(tri.pos[0]);
+            b.extend(tri.pos[1]);
+            b.extend(tri.pos[2]);
+            boxes[t] = b;
+            centroids[t] = tri.pos[0].add(tri.pos[1]).add(tri.pos[2]).scale(1.0 / 3.0);
+        }
+
         for (0..atlas.meshes.items.len) |mesh_idx| {
-            try self.build_mesh(atlas, mesh_idx, max_depth);
+            try self.build_mesh(atlas, mesh_idx, max_depth, boxes, centroids);
         }
     }
 
-    fn build_mesh(self: *Self, atlas: *const core.MeshAtlas, mesh_idx: usize, max_depth: u32) !void {
+    fn build_mesh(self: *Self, atlas: *const core.MeshAtlas, mesh_idx: usize, max_depth: u32, boxes: []const AABB, centroids: []const al.Vec3) !void {
         const node_offset = self.nodes.items.len;
         const prim_offset = self.prim_indices.items.len;
 
@@ -104,14 +206,13 @@ pub const BLASBuilder = struct {
         try self.nodes.ensureUnusedCapacity(2 * n_tris + 1);
 
         var root = try self.nodes.addOne();
-        root.box = AABB.empty();
         root.prims_offset = @intCast(prim_offset);
         root.prims_count = @intCast(n_tris);
         root.left_idx = -1;
         root.depth = 0;
-        self.update_node_aabb(atlas, root);
+        self.update_node_aabb(root, boxes);
 
-        try self.subdivide(atlas, root, 1, max_depth);
+        try self.subdivide(root, 1, max_depth, boxes, centroids);
 
         try self.meshinfo.append(.{
             .node_offset = @intCast(node_offset),
@@ -121,36 +222,30 @@ pub const BLASBuilder = struct {
         });
     }
 
-    fn update_node_aabb(self: *Self, atlas: *const core.MeshAtlas, node: *BVHNode) void {
+    fn update_node_aabb(self: *Self, node: *BVHNode, boxes: []const AABB) void {
         node.box = AABB.empty();
-
         for (0..node.prims_count) |pi| {
-            const leaf_tri_idx = self.prim_indices.items[node.prims_offset + pi];
-            // get_triangle returns model-space (untransformed) positions.
-            const leaf_tri = &atlas.get_triangle(leaf_tri_idx).?;
-            node.box.extend(leaf_tri.pos[0]);
-            node.box.extend(leaf_tri.pos[1]);
-            node.box.extend(leaf_tri.pos[2]);
+            const id = self.prim_indices.items[node.prims_offset + pi];
+            node.box.merge(&boxes[id]);
         }
     }
 
-    fn subdivide(self: *Self, atlas: *const core.MeshAtlas, node: *BVHNode, current_depth: u32, max_depth: u32) !void {
+    fn subdivide(self: *Self, node: *BVHNode, current_depth: u32, max_depth: u32, boxes: []const AABB, centroids: []const al.Vec3) !void {
         if (node.prims_count <= 2) return;
         if (current_depth > max_depth) return;
 
-        const extent = node.box.extent();
-        var axis: u32 = 0;
-        if (extent.y > extent.x) axis = 1;
-        if (extent.z > extent.get(axis)) axis = 2;
-        const split_pos = (node.box.min.get(axis) + node.box.max.get(axis)) * 0.5;
+        const split = find_best_split(self.prim_indices.items, node.prims_offset, node.prims_count, boxes, centroids) orelse return;
 
-        // partition into two groups (quicksort ish)
+        // Stop if splitting is not cheaper than keeping this node as a leaf.
+        const leaf_cost = @as(f32, @floatFromInt(node.prims_count)) * node.box.area();
+        if (split.cost >= leaf_cost) return;
+
+        // Partition prim_indices in place by the chosen plane.
         var i = node.prims_offset;
         var j = i + node.prims_count - 1;
         while (i <= j) {
-            const tri = atlas.get_triangle(self.prim_indices.items[i]).?;
-            const centroid = tri.pos[0].add(tri.pos[1]).add(tri.pos[2]).scale(1.0 / 3.0);
-            if (centroid.get(axis) < split_pos) {
+            const id = self.prim_indices.items[i];
+            if (centroids[id].get(split.axis) < split.pos) {
                 i += 1;
             } else {
                 if (j == 0) break;
@@ -179,11 +274,11 @@ pub const BLASBuilder = struct {
         node.left_idx = @as(i32, @intCast(left_child_idx));
         node.prims_count = 0; // turns it into an internal node
 
-        self.update_node_aabb(atlas, left_node);
-        self.update_node_aabb(atlas, right_node);
+        self.update_node_aabb(left_node, boxes);
+        self.update_node_aabb(right_node, boxes);
 
-        try self.subdivide(atlas, left_node, current_depth + 1, max_depth);
-        try self.subdivide(atlas, right_node, current_depth + 1, max_depth);
+        try self.subdivide(left_node, current_depth + 1, max_depth, boxes, centroids);
+        try self.subdivide(right_node, current_depth + 1, max_depth, boxes, centroids);
     }
 };
 
@@ -206,9 +301,22 @@ pub const TLASBuilder = struct {
     }
 
     pub fn build(self: *Self, atlas: *const core.MeshAtlas, max_depth: u32) !void {
+        const alloc = self.nodes.allocator;
         const n_prims = atlas.meshes.items.len;
+
         for (0..n_prims) |mi| {
             try self.prim_indices.append(@as(u32, @intCast(mi)));
+        }
+
+        // Precompute per-instance world-space box + centroid once, indexed by
+        // mesh index.
+        const boxes = try alloc.alloc(AABB, n_prims);
+        defer alloc.free(boxes);
+        const centroids = try alloc.alloc(al.Vec3, n_prims);
+        defer alloc.free(centroids);
+        for (0..n_prims) |m| {
+            boxes[m] = mesh_world_aabb(atlas, @intCast(m));
+            centroids[m] = boxes[m].center();
         }
 
         // A binary BVH over N instances has at most 2N-1 nodes; reserve up front
@@ -216,14 +324,13 @@ pub const TLASBuilder = struct {
         try self.nodes.ensureTotalCapacity(2 * n_prims + 1);
 
         var root = try self.nodes.addOne();
-        root.box = AABB.empty();
         root.prims_offset = 0;
         root.prims_count = @as(u32, @intCast(n_prims));
         root.left_idx = -1;
         root.depth = 0;
-        self.update_node_aabb(atlas, root);
+        self.update_node_aabb(root, boxes);
 
-        try self.subdivide(atlas, root, 1, max_depth);
+        try self.subdivide(root, 1, max_depth, boxes, centroids);
     }
 
     // World-space AABB of a single mesh instance.
@@ -240,34 +347,28 @@ pub const TLASBuilder = struct {
         return box;
     }
 
-    fn update_node_aabb(self: *Self, atlas: *const core.MeshAtlas, node: *BVHNode) void {
+    fn update_node_aabb(self: *Self, node: *BVHNode, boxes: []const AABB) void {
         node.box = AABB.empty();
         for (0..node.prims_count) |pi| {
-            const mesh_idx = self.prim_indices.items[node.prims_offset + pi];
-            var mesh_box = mesh_world_aabb(atlas, mesh_idx);
-            node.box.merge(&mesh_box);
+            const id = self.prim_indices.items[node.prims_offset + pi];
+            node.box.merge(&boxes[id]);
         }
     }
 
-    fn subdivide(self: *Self, atlas: *const core.MeshAtlas, node: *BVHNode, current_depth: u32, max_depth: u32) !void {
+    fn subdivide(self: *Self, node: *BVHNode, current_depth: u32, max_depth: u32, boxes: []const AABB, centroids: []const al.Vec3) !void {
         if (node.prims_count <= 2) return;
         if (current_depth > max_depth) return;
 
-        const extent = node.box.extent();
-        var axis: u32 = 0;
-        if (extent.y > extent.x) axis = 1;
-        if (extent.z > extent.get(axis)) axis = 2;
-        const split_pos = (node.box.min.get(axis) + node.box.max.get(axis)) * 0.5;
+        const split = find_best_split(self.prim_indices.items, node.prims_offset, node.prims_count, boxes, centroids) orelse return;
 
-        // partition into two groups (quicksort ish)
+        const leaf_cost = @as(f32, @floatFromInt(node.prims_count)) * node.box.area();
+        if (split.cost >= leaf_cost) return;
+
         var i = node.prims_offset;
         var j = i + node.prims_count - 1;
         while (i <= j) {
-            const mesh_idx = self.prim_indices.items[i];
-            const mesh_box = mesh_world_aabb(atlas, mesh_idx);
-            const centroid = mesh_box.center();
-
-            if (centroid.get(axis) < split_pos) {
+            const id = self.prim_indices.items[i];
+            if (centroids[id].get(split.axis) < split.pos) {
                 i += 1;
             } else {
                 if (j == 0) break;
@@ -296,10 +397,10 @@ pub const TLASBuilder = struct {
         node.left_idx = @as(i32, @intCast(left_child_idx));
         node.prims_count = 0; // turns it into an internal node
 
-        self.update_node_aabb(atlas, left_node);
-        self.update_node_aabb(atlas, right_node);
+        self.update_node_aabb(left_node, boxes);
+        self.update_node_aabb(right_node, boxes);
 
-        try self.subdivide(atlas, left_node, current_depth + 1, max_depth);
-        try self.subdivide(atlas, right_node, current_depth + 1, max_depth);
+        try self.subdivide(left_node, current_depth + 1, max_depth, boxes, centroids);
+        try self.subdivide(right_node, current_depth + 1, max_depth, boxes, centroids);
     }
 };
