@@ -39,6 +39,7 @@ pub fn build(b: *std.Build) void {
     raylib_mod.addLibraryPath(b.path("external/raylib-5.5_linux_amd64/lib/"));
     raylib_mod.linkSystemLibrary("raylib", .{});
     exe.root_module.addImport("raylib", raylib_mod);
+    exe.root_module.link_libcpp = true;
     link_cuda(b, exe);
 
     const raycast_o = compile_cuda(b, "cuda/raycast.cu", "build/raycast.o");
@@ -61,6 +62,7 @@ pub fn build(b: *std.Build) void {
     });
     link_cuda(b, test_exe);
     test_exe.root_module.link_libc = true;
+    test_exe.root_module.link_libcpp = true;
 
     test_exe.root_module.addObjectFile(raycast_o);
     test_exe.root_module.addObjectFile(add_o);
