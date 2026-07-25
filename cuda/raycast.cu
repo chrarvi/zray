@@ -173,6 +173,80 @@ __device__ bool ray_aabb_hit(const Ray* ray, const AABB* box) {
     return (t_close <= t_far) && (t_far >= 0.0f);
 }
 
+// Intersect a single mesh instance's BLAS in that mesh's model space.
+// `ray_model` is the world ray transformed by mesh->inv_model (direction left
+// UN-normalized so that the ray parameter t is identical in world and model
+// space). Updates *t_closest and, on a closer hit, fills *out with the hit in
+// model space (t, u, v, front_face, model-space normal, i0/i1/i2).
+__device__ bool blas_hit(const BLASMeshInfo* info, TensorView<BVHNode, 1> blas_nodes,
+                         TensorView<uint32_t, 1> blas_prim_indices,
+                         VertexBuffers const* vb, TensorView<uint32_t, 1> indices,
+                         Ray const* ray_model, float ray_tmin, float* t_closest,
+                         HitRecord* out) {
+    bool hit_anything = false;
+
+    const int MAX_STACK = 64;
+    int stack[MAX_STACK];
+    int stack_count = 0;
+    stack[stack_count++] = (int)info->node_offset;  // this mesh's BLAS root
+
+    while (stack_count > 0) {
+        int node_idx = stack[--stack_count];
+        const BVHNode* node = &blas_nodes.at(node_idx);
+
+        if (!ray_aabb_hit(ray_model, &node->box)) continue;
+
+        if (node->prims_count > 0) {
+            // Leaf: intersect triangles (model space).
+            for (int i = node->lp.prims_offset;
+                 i < node->lp.prims_offset + node->prims_count; ++i) {
+                uint32_t tri_index = blas_prim_indices.at(i);  // global triangle index
+                uint32_t i0 = indices.at(tri_index * 3 + 0);
+                uint32_t i1 = indices.at(tri_index * 3 + 1);
+                uint32_t i2 = indices.at(tri_index * 3 + 2);
+
+                vec3 p0 = tv_get_vec3(vb->pos, i0);
+                vec3 p1 = tv_get_vec3(vb->pos, i1);
+                vec3 p2 = tv_get_vec3(vb->pos, i2);
+
+                HitRecord tris_hit;
+                if (ray_triangle_hit(p0, p1, p2, ray_model, ray_tmin, *t_closest,
+                                     &tris_hit)) {
+                    hit_anything = true;
+                    *t_closest = tris_hit.t;
+
+                    vec3 n0 = tv_get_vec3(vb->norm, i0);
+                    vec3 n1 = tv_get_vec3(vb->norm, i1);
+                    vec3 n2 = tv_get_vec3(vb->norm, i2);
+                    // Model-space smooth normal; the caller transforms it to
+                    // world space.
+                    out->normal = bary_lerp(n0, n1, n2, tris_hit.u, tris_hit.v);
+
+                    out->t = tris_hit.t;
+                    out->front_face = tris_hit.front_face;
+                    out->u = tris_hit.u;
+                    out->v = tris_hit.v;
+                    out->i0 = i0;
+                    out->i1 = i1;
+                    out->i2 = i2;
+                }
+            }
+        } else {
+            int left = node->lp.left_idx;
+            int right = node->lp.left_idx + 1;
+            const BVHNode* left_node = &blas_nodes.at(left);
+            const BVHNode* right_node = &blas_nodes.at(right);
+            if (ray_aabb_hit(ray_model, &left_node->box)) stack[stack_count++] = left;
+            if (ray_aabb_hit(ray_model, &right_node->box)) stack[stack_count++] = right;
+        }
+    }
+
+    return hit_anything;
+}
+
+// Two-level (TLAS over instances -> per-instance BLAS) traversal. The incoming
+// ray is in world space. On the closest hit, *out is filled entirely in world
+// space (point, normal).
 __device__ bool ray_bvh_hit(TensorView<BLASMeshInfo, 1> blas_meshinfo,
                             TensorView<BVHNode, 1> blas_nodes,
                             TensorView<uint32_t, 1> blas_prim_indices,
@@ -189,34 +263,27 @@ __device__ bool ray_bvh_hit(TensorView<BLASMeshInfo, 1> blas_meshinfo,
     const int MAX_STACK = 64;
     int stack[MAX_STACK];
     int stack_count = 0;
-
-    stack[stack_count++] = 0;  // root
+    stack[stack_count++] = 0;  // TLAS root
 
     while (stack_count > 0) {
         int node_idx = stack[--stack_count];
-        const BVHNode* node = &blas_nodes.at(node_idx);
+        const BVHNode* node = &tlas_nodes.at(node_idx);
 
-        if (!ray_aabb_hit(ray, &node->box)) continue;
+        if (!ray_aabb_hit(ray, &node->box)) continue;  // world ray vs world box
 
         if (node->prims_count > 0) {
-            // Leaf node: intersect triangles
-            for (int i = node->lp.prims_offset;
-                 i < node->lp.prims_offset + node->prims_count; ++i) {
-                uint32_t tri_index = blas_prim_indices.at(i);
-                uint32_t i0 = indices.at(tri_index * 3 + 0);
-                uint32_t i1 = indices.at(tri_index * 3 + 1);
-                uint32_t i2 = indices.at(tri_index * 3 + 2);
+            // Leaf: mesh instances.
+            for (int p = node->lp.prims_offset;
+                 p < node->lp.prims_offset + node->prims_count; ++p) {
+                uint32_t mesh_id = tlas_prim_indices.at(p);
+                const Mesh* mesh = &meshes.at(mesh_id);
+                const BLASMeshInfo* info = &blas_meshinfo.at(mesh_id);
 
-                vec3 p0 = tv_get_vec3(vb->pos, i0);
-                vec3 p1 = tv_get_vec3(vb->pos, i1);
-                vec3 p2 = tv_get_vec3(vb->pos, i2);
-
-                uint32_t mesh_id = mesh_ids.at(i0);
-                Mesh* mesh = &meshes.at(mesh_id);
-
-                vec4 ray_o_h = {ray->origin.x, ray->origin.y, ray->origin.z,
-                                1.0};
-                vec4 ray_d_h = {ray->dir.x, ray->dir.y, ray->dir.z, 0.0};
+                // Transform the world ray into this instance's model space.
+                // The direction is intentionally NOT normalized so that the ray
+                // parameter t matches between world and model space.
+                vec4 ray_o_h = {ray->origin.x, ray->origin.y, ray->origin.z, 1.0f};
+                vec4 ray_d_h = {ray->dir.x, ray->dir.y, ray->dir.z, 0.0f};
                 vec4 ray_o_model = mat4_lmmul(mesh->inv_model, ray_o_h);
                 vec4 ray_d_model = mat4_lmmul(mesh->inv_model, ray_d_h);
                 Ray ray_model = {
@@ -224,49 +291,38 @@ __device__ bool ray_bvh_hit(TensorView<BLASMeshInfo, 1> blas_meshinfo,
                     .dir = {ray_d_model.x, ray_d_model.y, ray_d_model.z},
                 };
 
-                HitRecord tris_hit;
-                if (ray_triangle_hit(p0, p1, p2, &ray_model, ray_tmin,
-                                     t_closest, &tris_hit)) {
+                HitRecord blas_rec;
+                if (blas_hit(info, blas_nodes, blas_prim_indices, vb, indices,
+                             &ray_model, ray_tmin, &t_closest, &blas_rec)) {
                     hit_anything = true;
-                    t_closest = tris_hit.t;
 
-                    vec3 n0 = normalize(tv_get_vec3(vb->norm, i0));
-                    vec3 n1 = normalize(tv_get_vec3(vb->norm, i1));
-                    vec3 n2 = normalize(tv_get_vec3(vb->norm, i2));
-                    vec3 n = normalize(
-                        bary_lerp(n0, n1, n2, tris_hit.u, tris_hit.v));
-                    if (!tris_hit.front_face) n = n * -1.0f;
+                    // Bring the hit back to world space. Because t is preserved,
+                    // the world-space point is just the world ray evaluated at t.
+                    // The normal transforms by the inverse-transpose of the
+                    // model matrix, i.e. transpose(inv_model) * n, which is
+                    // mat3_rmmul(n, inv_model).
+                    vec3 n_world =
+                        normalize(mat3_rmmul(blas_rec.normal, mesh->inv_model));
+                    if (!blas_rec.front_face) n_world = n_world * -1.0f;
 
-                    out->t = tris_hit.t;
-                    out->point = tris_hit.point;
-                    out->normal = n;
-                    out->front_face = tris_hit.front_face;
-                    out->u = tris_hit.u;
-                    out->v = tris_hit.v;
-                    out->i0 = i0;
-                    out->i1 = i1;
-                    out->i2 = i2;
+                    out->t = blas_rec.t;
+                    out->point = ray_at(ray, blas_rec.t);
+                    out->normal = n_world;
+                    out->front_face = blas_rec.front_face;
+                    out->u = blas_rec.u;
+                    out->v = blas_rec.v;
+                    out->i0 = blas_rec.i0;
+                    out->i1 = blas_rec.i1;
+                    out->i2 = blas_rec.i2;
                 }
             }
         } else {
-            // Internal node: traverse closest child first
             int left = node->lp.left_idx;
             int right = node->lp.left_idx + 1;
-
-            const BVHNode* left_node = &blas_nodes.at(left);
-            const BVHNode* right_node = &blas_nodes.at(right);
-
-            float t_left = ray_aabb_hit(ray, &left_node->box) ? 0.0f : INFINITY;
-            float t_right =
-                ray_aabb_hit(ray, &right_node->box) ? 0.0f : INFINITY;
-
-            if (t_left < t_right) {
-                if (t_right < INFINITY) stack[stack_count++] = right;
-                if (t_left < INFINITY) stack[stack_count++] = left;
-            } else {
-                if (t_left < INFINITY) stack[stack_count++] = left;
-                if (t_right < INFINITY) stack[stack_count++] = right;
-            }
+            const BVHNode* left_node = &tlas_nodes.at(left);
+            const BVHNode* right_node = &tlas_nodes.at(right);
+            if (ray_aabb_hit(ray, &left_node->box)) stack[stack_count++] = left;
+            if (ray_aabb_hit(ray, &right_node->box)) stack[stack_count++] = right;
         }
     }
 

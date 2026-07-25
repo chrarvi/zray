@@ -1,7 +1,16 @@
 /// BVH implementation.
 /// Translated from https://jacco.ompf2.com/2022/04/13/how-to-build-a-bvh-part-1-basics/
+///
+/// Two-level acceleration structure:
+///   * BLASBuilder builds one BVH per mesh in that mesh's *model* space. All
+///     meshes' nodes are concatenated into a single `nodes` buffer; each mesh's
+///     sub-range is described by an entry in `meshinfo` (see rc.BLASMeshInfo).
+///   * TLASBuilder builds a single BVH over the mesh instances in *world* space
+///     (i.e. after each mesh's model transform has been applied). Its leaves
+///     reference mesh indices via `prim_indices`.
 const al = @import("linalg.zig");
 const core = @import("core.zig");
+const rc = @import("../gpu/raycast.zig");
 const std = @import("std");
 
 const AABB = struct {
@@ -32,48 +41,80 @@ const AABB = struct {
     }
 };
 
-const BVHNode = struct {
+pub const BVHNode = struct {
     box: AABB,
+    // For an internal node (prims_count == 0) this is the absolute index of the
+    // left child in the shared node buffer (right child is left_idx + 1).
+    // For a leaf it is unused (-1); leaves use prims_offset/prims_count.
     left_idx: i32 = -1,
+    // Absolute offset into the builder's prim_indices buffer.
     prims_offset: u32,
     prims_count: u32,
 };
-
 
 pub const BLASBuilder = struct {
     const Self = @This();
 
     nodes: std.array_list.Managed(BVHNode),
+    // Global triangle indices (index into MeshAtlas via get_triangle), grouped
+    // by mesh in the same order as `meshinfo`.
     prim_indices: std.array_list.Managed(u32),
+    // One entry per mesh describing its node/prim sub-range.
+    meshinfo: std.array_list.Managed(rc.BLASMeshInfo),
 
     pub fn init(alloc: std.mem.Allocator) Self {
         return Self{
             .nodes = std.array_list.Managed(BVHNode).init(alloc),
             .prim_indices = std.array_list.Managed(u32).init(alloc),
+            .meshinfo = std.array_list.Managed(rc.BLASMeshInfo).init(alloc),
         };
     }
     pub fn deinit(self: *BLASBuilder) void {
         self.nodes.deinit();
         self.prim_indices.deinit();
+        self.meshinfo.deinit();
     }
 
     pub fn build(self: *Self, atlas: *const core.MeshAtlas, max_depth: u32) !void {
-        const n_prims = atlas.num_triangles();
-        for (0..n_prims) |ti| {
-            try self.prim_indices.append(@as(u32, @intCast(ti)));
+        for (0..atlas.meshes.items.len) |mesh_idx| {
+            try self.build_mesh(atlas, mesh_idx, max_depth);
+        }
+    }
+
+    fn build_mesh(self: *Self, atlas: *const core.MeshAtlas, mesh_idx: usize, max_depth: u32) !void {
+        const node_offset = self.nodes.items.len;
+        const prim_offset = self.prim_indices.items.len;
+
+        const mesh = atlas.meshes.items[mesh_idx];
+        // index_start is a multiple of 3, so the first global triangle index of
+        // this mesh is index_start / 3.
+        const tri_base: u32 = @intCast(mesh.index_start / 3);
+        const n_tris = atlas.num_mesh_triangles(mesh_idx);
+
+        for (0..n_tris) |t| {
+            try self.prim_indices.append(tri_base + @as(u32, @intCast(t)));
         }
 
-        // Do this up front to save ourselves reallocations
-        try self.nodes.ensureTotalCapacity(std.math.pow(u32, 2, max_depth + 1) - 1);
+        // Reserve enough unused capacity so that node pointers obtained via
+        // addOne() stay valid for the duration of this mesh's subdivide. A
+        // binary BVH over N primitives has at most 2N-1 nodes.
+        try self.nodes.ensureUnusedCapacity(2 * n_tris + 1);
 
         var root = try self.nodes.addOne();
         root.box = AABB.empty();
-        root.prims_offset = 0;
-        root.prims_count = @as(u32, @intCast(n_prims));
+        root.prims_offset = @intCast(prim_offset);
+        root.prims_count = @intCast(n_tris);
         root.left_idx = -1;
         self.update_node_aabb(atlas, root);
 
         try self.subdivide(atlas, root, 1, max_depth);
+
+        try self.meshinfo.append(.{
+            .node_offset = @intCast(node_offset),
+            .node_count = @intCast(self.nodes.items.len - node_offset),
+            .prim_offset = @intCast(prim_offset),
+            .prim_count = @intCast(n_tris),
+        });
     }
 
     fn update_node_aabb(self: *Self, atlas: *const core.MeshAtlas, node: *BVHNode) void {
@@ -81,6 +122,7 @@ pub const BLASBuilder = struct {
 
         for (0..node.prims_count) |pi| {
             const leaf_tri_idx = self.prim_indices.items[node.prims_offset + pi];
+            // get_triangle returns model-space (untransformed) positions.
             const leaf_tri = &atlas.get_triangle(leaf_tri_idx).?;
             node.box.extend(leaf_tri.pos[0]);
             node.box.extend(leaf_tri.pos[1]);
@@ -142,6 +184,7 @@ pub const TLASBuilder = struct {
     const Self = @This();
 
     nodes: std.array_list.Managed(BVHNode),
+    // Mesh (instance) indices.
     prim_indices: std.array_list.Managed(u32),
 
     pub fn init(alloc: std.mem.Allocator) Self {
@@ -157,12 +200,13 @@ pub const TLASBuilder = struct {
 
     pub fn build(self: *Self, atlas: *const core.MeshAtlas, max_depth: u32) !void {
         const n_prims = atlas.meshes.items.len;
-        for (0..n_prims) |ti| {
-            try self.prim_indices.append(@as(u32, @intCast(ti)));
+        for (0..n_prims) |mi| {
+            try self.prim_indices.append(@as(u32, @intCast(mi)));
         }
 
-        // Do this up front to save ourselves reallocations
-        try self.nodes.ensureTotalCapacity(std.math.pow(u32, 2, max_depth + 1) - 1);
+        // A binary BVH over N instances has at most 2N-1 nodes; reserve up front
+        // so node pointers stay valid across subdivide.
+        try self.nodes.ensureTotalCapacity(2 * n_prims + 1);
 
         var root = try self.nodes.addOne();
         root.box = AABB.empty();
@@ -172,25 +216,27 @@ pub const TLASBuilder = struct {
         self.update_node_aabb(atlas, root);
 
         try self.subdivide(atlas, root, 1, max_depth);
+    }
 
-        for (self.nodes.items, 0..) |node, i| {
-            std.debug.print("{}: {any}\n", .{i, node});
+    // World-space AABB of a single mesh instance.
+    fn mesh_world_aabb(atlas: *const core.MeshAtlas, mesh_idx: u32) AABB {
+        var box = AABB.empty();
+        const n_tris = atlas.num_mesh_triangles(mesh_idx);
+        for (0..n_tris) |t| {
+            // get_mesh_triangle returns world-space (model-transformed) positions.
+            const tri = atlas.get_mesh_triangle(mesh_idx, t).?;
+            box.extend(tri.pos[0]);
+            box.extend(tri.pos[1]);
+            box.extend(tri.pos[2]);
         }
+        return box;
     }
 
     fn update_node_aabb(self: *Self, atlas: *const core.MeshAtlas, node: *BVHNode) void {
         node.box = AABB.empty();
         for (0..node.prims_count) |pi| {
             const mesh_idx = self.prim_indices.items[node.prims_offset + pi];
-            const mesh = &atlas.meshes.items[mesh_idx];
-
-            var mesh_box = AABB.empty();
-            for (0..mesh.index_count) |vert_idx| {
-                const tri = atlas.get_mesh_triangle(mesh_idx,  vert_idx / 3);
-                mesh_box.extend(tri.?.pos[0]);
-                mesh_box.extend(tri.?.pos[1]);
-                mesh_box.extend(tri.?.pos[2]);
-            }
+            var mesh_box = mesh_world_aabb(atlas, mesh_idx);
             node.box.merge(&mesh_box);
         }
     }
@@ -210,14 +256,7 @@ pub const TLASBuilder = struct {
         var j = i + node.prims_count - 1;
         while (i <= j) {
             const mesh_idx = self.prim_indices.items[i];
-            const mesh = &atlas.meshes.items[mesh_idx];
-            var mesh_box = AABB.empty();
-            for (0..mesh.index_count) |vert_idx| {
-                const tri = &atlas.get_mesh_triangle(mesh_idx, vert_idx / 3).?;
-                mesh_box.extend(tri.pos[0]);
-                mesh_box.extend(tri.pos[1]);
-                mesh_box.extend(tri.pos[2]);
-            }
+            const mesh_box = mesh_world_aabb(atlas, mesh_idx);
             const centroid = mesh_box.center();
 
             if (centroid.get(axis) < split_pos) {

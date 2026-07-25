@@ -235,8 +235,8 @@ pub fn main() !void {
         n_indices,
         n_meshes,
         n_materials,
-        BLAS_MAX_DEPTH,
-        TLAS_MAX_DEPTH,
+        world.blas.nodes.items.len,
+        world.tlas.nodes.items.len,
     );
     defer world_dev.deinit();
 
@@ -246,7 +246,7 @@ pub fn main() !void {
     try world_dev.mesh_ids.fromHost(world.mesh_atlas.mesh_ids.items);
     try world_dev.meshes.fromHost(world.mesh_atlas.meshes.items);
     try world_dev.materials.fromHost(world.materials.items);
-    try world_dev.bvh_to_device(&world.blas, gpa);
+    try world_dev.bvh_to_device(&world.blas, &world.tlas, gpa);
 
     var shared = sim.SimSharedState{
         .frame_buffers_host = .{ img_host0, img_host1 },
