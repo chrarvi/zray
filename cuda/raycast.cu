@@ -152,8 +152,10 @@ __device__ bool ray_triangle_hit(const vec3 p1, const vec3 p2, const vec3 p3,
     return true;
 }
 
-// SLAB aabb intersection test
-__device__ bool ray_aabb_hit(const Ray* ray, const AABB* box) {
+// SLAB aabb intersection test. On hit, writes the near intersection distance
+// (t at box entry) to *t_near, which the BVH traversal uses for ordering and
+// for pruning boxes that lie beyond the closest hit found so far.
+__device__ bool ray_aabb_hit(const Ray* ray, const AABB* box, float* t_near) {
     vec3 recip_dir = 1.0f / ray->dir;
 
     vec3 t_low = (box->min - ray->origin) * recip_dir;
@@ -165,6 +167,7 @@ __device__ bool ray_aabb_hit(const Ray* ray, const AABB* box) {
     float t_close = fmaxf(t_vec_close);
     float t_far = fminf(t_vec_far);
 
+    *t_near = t_close;
     return (t_close <= t_far) && (t_far >= 0.0f);
 }
 
@@ -176,19 +179,23 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
     float t_closest = ray_tmax;
 
     const size_t MAX_BVH_DEPTH = 64;  // todo get from bvh builder
-    size_t node_stack[MAX_BVH_DEPTH];
-    size_t node_stack_count = 0;
+    // Each stack entry carries the box's near-hit distance so we can prune it
+    // against t_closest at pop time (t_closest may have shrunk since it was
+    // pushed) without re-testing the box.
+    struct StackEntry { unsigned int idx; float t_near; };
+    StackEntry node_stack[MAX_BVH_DEPTH];
+    int node_stack_count = 0;
 
-
-    node_stack[node_stack_count++] = 0;
+    node_stack[node_stack_count++] = { 0u, ray_tmin };
     bool hit_anything = false;
 
     while (node_stack_count > 0) {
-        size_t node_idx = node_stack[--node_stack_count];
-        BVHNode const* node = &bvh_nodes.at(node_idx);
-        if (!ray_aabb_hit(ray, &node->box)) {
+        StackEntry entry = node_stack[--node_stack_count];
+        // Entire box is beyond the closest hit found so far: skip it.
+        if (entry.t_near > t_closest) {
             continue;
         }
+        BVHNode const* node = &bvh_nodes.at(entry.idx);
 
         if (node->prims_count > 0) {
             for (int tidx = node->prims_offset; tidx < node->prims_offset + node->prims_count; ++tidx) {
@@ -218,8 +225,31 @@ __device__ bool ray_bvh_hit(TensorView<BVHNode, 1> bvh_nodes,
                 }
             }
         } else {
-            node_stack[node_stack_count++] = node->right_idx;
-            node_stack[node_stack_count++] = node->left_idx;
+            // Internal node: test both children now so we can (a) prune the
+            // ones beyond the closest hit and (b) push them far-first so the
+            // nearer child is popped (and tested against t_closest) first.
+            unsigned int left_idx = (unsigned int)node->left_idx;
+            unsigned int right_idx = (unsigned int)node->right_idx;
+
+            float t_left, t_right;
+            bool hit_left = ray_aabb_hit(ray, &bvh_nodes.at(left_idx).box, &t_left) &&
+                            (t_left <= t_closest);
+            bool hit_right = ray_aabb_hit(ray, &bvh_nodes.at(right_idx).box, &t_right) &&
+                             (t_right <= t_closest);
+
+            if (hit_left && hit_right) {
+                if (t_left <= t_right) {
+                    node_stack[node_stack_count++] = { right_idx, t_right };  // farther: popped last
+                    node_stack[node_stack_count++] = { left_idx, t_left };    // nearer: popped first
+                } else {
+                    node_stack[node_stack_count++] = { left_idx, t_left };
+                    node_stack[node_stack_count++] = { right_idx, t_right };
+                }
+            } else if (hit_left) {
+                node_stack[node_stack_count++] = { left_idx, t_left };
+            } else if (hit_right) {
+                node_stack[node_stack_count++] = { right_idx, t_right };
+            }
         }
     }
     return hit_anything;
@@ -238,7 +268,8 @@ __device__ bool mesh_hit(const Ray* ray, const VertexBuffers* vb,
 
     for (size_t m = 0; m < meshes.shape[0]; ++m) {
         Mesh* mesh = &meshes.at(m);
-        if (!ray_aabb_hit(ray, &mesh->box)) {
+        float box_t_near;
+        if (!ray_aabb_hit(ray, &mesh->box, &box_t_near)) {
             continue;
         }
 
