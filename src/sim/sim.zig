@@ -12,8 +12,6 @@ pub const SimSharedState = struct {
     frame_buffer_dev_accum: gpu.cuda.CudaBuffer(f32),
     ready_idx: AtomicUsize, // which buffer is ready for display
     running: AtomicBool, // shutdown flag
-    blas_max_depth: u32,
-    tlas_max_depth: u32,
     cam: rc.CameraData,
     world: *core.World,
     world_dev: *gpu.DeviceWorld,

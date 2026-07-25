@@ -20,8 +20,13 @@ const RENDERING_FRAMERATE: f32 = 144.0;
 
 const NUM_SPHERES = 4;
 
+const RAY_MAX_DEPTH = 8;
+const SAMPLES_PER_PIXEL = 24;
 const BLAS_MAX_DEPTH = 24;
 const TLAS_MAX_DEPTH = 20;
+
+const PREVIEW_RAY_MAX_DEPTH = 4;
+const PREVIEW_SAMPLES_PER_PIXEL = 2;
 
 pub fn setup_bvh_scene(
     world: *core.World,
@@ -237,7 +242,7 @@ pub fn main() !void {
     var gpa = std.heap.page_allocator;
 
     const aspect_ratio = 16.0 / 9.0;
-    const image_width: u32 = 1920;
+    const image_width: u32 = 960;
     const image_height: u32 = @intFromFloat(@max(@divFloor(@as(f32, @floatFromInt(image_width)), aspect_ratio), 1));
 
     // double-buffering
@@ -265,8 +270,8 @@ pub fn main() !void {
 
     var world = try core.World.init(gpa);
     defer world.deinit();
-    try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
-    // try setup_teapot_scene(&world, al.Vec3.full(1.0));
+    // try setup_box_scene(&world, al.Vec3.new(4.0, 3.0, 10.0));
+    try setup_teapot_scene(&world, al.Vec3.full(1.0));
 
     try world.blas.build(&world.mesh_atlas, BLAS_MAX_DEPTH);
     try world.tlas.build(&world.mesh_atlas, TLAS_MAX_DEPTH);
@@ -301,15 +306,13 @@ pub fn main() !void {
         .frame_buffer_dev_accum = try cu.CudaBuffer(f32).init(buf_size),
         .ready_idx = AtomicUsize.init(0),
         .running = AtomicBool.init(true),
-        .blas_max_depth = BLAS_MAX_DEPTH,
-        .tlas_max_depth = TLAS_MAX_DEPTH,
         .cam = rc.CameraData{
             .image_width = image_width,
             .image_height = image_height,
             .focal_length = 1.0,
-            .samples_per_pixel = 8,
+            .samples_per_pixel = PREVIEW_SAMPLES_PER_PIXEL,
             .temporal_averaging = false,
-            .max_depth = 8,
+            .max_depth = PREVIEW_RAY_MAX_DEPTH,
             .camera_to_world = camera.camera_to_world(),
             .inv_proj = camera.inv_proj,
         },
@@ -356,18 +359,18 @@ pub fn main() !void {
 
         // Debug overlay controls.
         if (rl.IsKeyPressed(rl.KEY_B)) draw_aabb = !draw_aabb;
-        if (rl.IsKeyPressed(rl.KEY_RIGHT_BRACKET)) blas_draw_depth += 1;
+        if (rl.IsKeyPressed(rl.KEY_RIGHT_BRACKET) and blas_draw_depth <= BLAS_MAX_DEPTH) blas_draw_depth += 1;
         if (rl.IsKeyPressed(rl.KEY_LEFT_BRACKET) and blas_draw_depth > 0) blas_draw_depth -= 1;
 
         if (rl.IsKeyPressed(rl.KEY_P)) {
             rc.launch_clear_buffer(try shared.frame_buffer_dev_accum.view(3, .{ shared.cam.image_height, shared.cam.image_width, 3 }));
             shared.cam.temporal_averaging = !shared.cam.temporal_averaging;
             if (shared.cam.temporal_averaging) {
-                shared.cam.max_depth = 8;
-                shared.cam.samples_per_pixel = 16;
+                shared.cam.max_depth = RAY_MAX_DEPTH;
+                shared.cam.samples_per_pixel = SAMPLES_PER_PIXEL;
             } else {
-                shared.cam.max_depth = 2;
-                shared.cam.samples_per_pixel = 4;
+                shared.cam.max_depth = PREVIEW_RAY_MAX_DEPTH;
+                shared.cam.samples_per_pixel = PREVIEW_SAMPLES_PER_PIXEL;
             }
 
             shared.frame_idx = 0;
@@ -422,7 +425,7 @@ pub fn main() !void {
         rl.DrawRectangle(5, 5, 560, 52, rl.Color{ .r = 0, .g = 0, .b = 0, .a = 160 });
         rl.DrawText(txt.ptr, 12, 10, 20, rl.GREEN);
         if (draw_aabb) {
-            rl.DrawText("[B] AABBs: ON   [ [ / ] ] BLAS depth", 12, 33, 18, rl.RAYWHITE);
+            rl.DrawText("[B] AABBs: ON", 12, 33, 18, rl.RAYWHITE);
         } else {
             rl.DrawText("[B] AABBs: OFF", 12, 33, 18, rl.RAYWHITE);
         }
