@@ -4,16 +4,16 @@ const rc = @import("../gpu/raycast.zig");
 
 const World = @This();
 
-spheres: std.ArrayList(rc.Sphere),
+spheres: std.array_list.Managed(rc.Sphere),
 mesh_atlas: core.MeshAtlas,
-materials: std.ArrayList(rc.Material),
+materials: std.array_list.Managed(rc.Material),
 bvh: core.BVHBuilder,
 
 pub fn init(allocator: std.mem.Allocator) !World {
     return .{
-        .spheres = std.ArrayList(rc.Sphere).init(allocator),
+        .spheres = std.array_list.Managed(rc.Sphere).init(allocator),
         .mesh_atlas = core.MeshAtlas.init(allocator),
-        .materials = std.ArrayList(rc.Material).init(allocator),
+        .materials = std.array_list.Managed(rc.Material).init(allocator),
         .bvh = core.BVHBuilder.init(allocator),
     };
 }

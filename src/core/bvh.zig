@@ -44,13 +44,13 @@ pub const BVHBuilder = struct {
         depth: u32,  // debug, get rid of to save space
     };
 
-    nodes: std.ArrayList(Node),
-    prim_indices: std.ArrayList(u32),
+    nodes: std.array_list.Managed(Node),
+    prim_indices: std.array_list.Managed(u32),
 
     pub fn init(alloc: std.mem.Allocator) Self {
         return Self{
-            .nodes = std.ArrayList(Node).init(alloc),
-            .prim_indices = std.ArrayList(u32).init(alloc),
+            .nodes = std.array_list.Managed(Node).init(alloc),
+            .prim_indices = std.array_list.Managed(u32).init(alloc),
         };
     }
     pub fn deinit(self: *BVHBuilder) void {

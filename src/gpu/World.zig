@@ -47,7 +47,7 @@ pub fn deinit(self: *DeviceWorld) void {
 }
 
 pub fn bvh_to_device(self: *DeviceWorld, host: *const HostBVH, alloc: std.mem.Allocator) !void {
-    var temp_buffer = try std.ArrayList(rc.BVHNode).initCapacity(alloc, host.nodes.items.len);
+    var temp_buffer = try std.array_list.Managed(rc.BVHNode).initCapacity(alloc, host.nodes.items.len);
     defer temp_buffer.deinit();
 
     for (host.nodes.items) |node| {

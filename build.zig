@@ -8,12 +8,12 @@ pub fn compile_cuda(b: *std.Build, cuda_file: []const u8, obj_file: []const u8) 
 }
 
 pub fn link_cuda(b: *std.Build, exe: *std.Build.Step.Compile) void{
-    exe.addLibraryPath(.{
+    exe.root_module.addLibraryPath(.{
         .cwd_relative = "/opt/cuda/lib64/",
     });
-    exe.addIncludePath(.{ .cwd_relative = "/opt/cuda/include" });
-    exe.addIncludePath(b.path("cuda"));
-    exe.linkSystemLibrary("cudart");
+    exe.root_module.addIncludePath(.{ .cwd_relative = "/opt/cuda/include" });
+    exe.root_module.addIncludePath(b.path("cuda"));
+    exe.root_module.linkSystemLibrary("cudart", .{});
 }
 
 
@@ -55,14 +55,14 @@ pub fn build(b: *std.Build) void {
 
     exe.root_module.addImport("stb_image_write", stbiw_mod);
     exe.root_module.addImport("raylib", raylib_mod);
-    exe.addLibraryPath(b.path("external/raylib-5.5_linux_amd64/lib/"));
-    exe.linkSystemLibrary("raylib");
-    exe.linkLibC();
+    exe.root_module.addLibraryPath(b.path("external/raylib-5.5_linux_amd64/lib/"));
+    exe.root_module.linkSystemLibrary("raylib", .{});
+    exe.root_module.link_libc = true;
     link_cuda(b, exe);
 
     for (cuda_steps) |s| exe.step.dependOn(s);
-    exe.addObjectFile(b.path(raycast_o));
-    exe.addObjectFile(b.path(add_o));
+    exe.root_module.addObjectFile(b.path(raycast_o));
+    exe.root_module.addObjectFile(b.path(add_o));
 
     b.installArtifact(exe);
 
@@ -78,12 +78,12 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    test_exe.linkLibC();
+    test_exe.root_module.link_libc = true;
     link_cuda(b, test_exe);
 
     for (cuda_steps) |s| test_exe.step.dependOn(s);
-    test_exe.addObjectFile(b.path(raycast_o));
-    test_exe.addObjectFile(b.path(add_o));
+    test_exe.root_module.addObjectFile(b.path(raycast_o));
+    test_exe.root_module.addObjectFile(b.path(add_o));
 
     const test_step = b.step("test", "Run all tests");
     const run_tests = b.addRunArtifact(test_exe);
