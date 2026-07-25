@@ -3,15 +3,15 @@ const al = @import("linalg.zig");
 const cu = @import("../gpu/cuda.zig");
 
 const Self = @This();
-pos_buf: std.ArrayList(al.Vec4),
-color_buf: std.ArrayList(al.Vec4),
-normal_buf: std.ArrayList(al.Vec4),
+pos_buf: std.array_list.Managed(al.Vec4),
+color_buf: std.array_list.Managed(al.Vec4),
+normal_buf: std.array_list.Managed(al.Vec4),
 
 pub fn init(allocator: std.mem.Allocator) Self {
     return .{
-        .pos_buf= std.ArrayList(al.Vec4).init(allocator),
-        .color_buf= std.ArrayList(al.Vec4).init(allocator),
-        .normal_buf= std.ArrayList(al.Vec4).init(allocator),
+        .pos_buf= std.array_list.Managed(al.Vec4).init(allocator),
+        .color_buf= std.array_list.Managed(al.Vec4).init(allocator),
+        .normal_buf= std.array_list.Managed(al.Vec4).init(allocator),
     };
 }
 

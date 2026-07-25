@@ -60,6 +60,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     link_cuda(b, test_exe);
+    test_exe.root_module.link_libc = true;
 
     test_exe.root_module.addObjectFile(raycast_o);
     test_exe.root_module.addObjectFile(add_o);

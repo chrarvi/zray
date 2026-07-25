@@ -15,16 +15,16 @@ const Triangle = struct {
 
 pub const MeshAtlas = struct {
     vb: core.HostVertexBuffer,
-    indices: std.ArrayList(u32),
-    mesh_ids: std.ArrayList(u32),
-    meshes: std.ArrayList(rc.Mesh),
+    indices: std.array_list.Managed(u32),
+    mesh_ids: std.array_list.Managed(u32),
+    meshes: std.array_list.Managed(rc.Mesh),
 
     pub fn init(allocator: std.mem.Allocator) MeshAtlas {
         return .{
             .vb = core.HostVertexBuffer.init(allocator),
-            .indices = std.ArrayList(u32).init(allocator),
-            .mesh_ids = std.ArrayList(u32).init(allocator),
-            .meshes = std.ArrayList(rc.Mesh).init(allocator),
+            .indices = std.array_list.Managed(u32).init(allocator),
+            .mesh_ids = std.array_list.Managed(u32).init(allocator),
+            .meshes = std.array_list.Managed(rc.Mesh).init(allocator),
         };
     }
 
@@ -36,13 +36,18 @@ pub const MeshAtlas = struct {
     }
 
     pub fn parse_mesh_from_file(self: *MeshAtlas, filename: []const u8) !*rc.Mesh {
-        const file = try std.fs.cwd().openFile(filename, .{});
-        defer file.close();
-        var reader = file.reader();
+        var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+        defer threaded.deinit();
+        const io = threaded.io();
+
+        const file = try std.Io.Dir.cwd().openFile(io, filename, .{});
+        defer file.close(io);
 
         var line_buf: [256]u8 = undefined;
+        var file_reader = file.reader(io, &line_buf);
+        const reader = &file_reader.interface;
 
-        const first_line = (try reader.readUntilDelimiterOrEof(&line_buf, '\n')).?;
+        const first_line = (try reader.takeDelimiter('\n')).?;
         const num_tris: usize = try std.fmt.parseInt(usize, first_line, 10);
 
         const vertex_start = self.vb.pos_buf.items.len;
@@ -51,7 +56,7 @@ pub const MeshAtlas = struct {
         const mesh_idx = @as(u32, @intCast(self.meshes.items.len));
         for (0..num_tris) |t_idx| {
             for (0..3) |v_idx| {
-                const pos_line = (try reader.readUntilDelimiterOrEof(&line_buf, '\n')).?;
+                const pos_line = (try reader.takeDelimiter('\n')).?;
                 var pos_iter = std.mem.splitScalar(u8, pos_line, ' ');
 
                 const vert = al.Vec4.new(
@@ -61,7 +66,7 @@ pub const MeshAtlas = struct {
                     1.0,
                 );
 
-                const norm_line = (try reader.readUntilDelimiterOrEof(&line_buf, '\n')).?;
+                const norm_line = (try reader.takeDelimiter('\n')).?;
                 var norm_iter = std.mem.splitScalar(u8, norm_line, ' ');
 
                 const normal = al.Vec4.new(
@@ -78,7 +83,7 @@ pub const MeshAtlas = struct {
                 try self.mesh_ids.append(mesh_idx);
             }
 
-            _ = try reader.readUntilDelimiterOrEof(&line_buf, '\n');
+            _ = try reader.takeDelimiter('\n');
         }
 
         var mesh = try self.meshes.addOne();

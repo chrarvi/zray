@@ -43,13 +43,13 @@ const BVHNode = struct {
 pub const BLASBuilder = struct {
     const Self = @This();
 
-    nodes: std.ArrayList(BVHNode),
-    prim_indices: std.ArrayList(u32),
+    nodes: std.array_list.Managed(BVHNode),
+    prim_indices: std.array_list.Managed(u32),
 
     pub fn init(alloc: std.mem.Allocator) Self {
         return Self{
-            .nodes = std.ArrayList(BVHNode).init(alloc),
-            .prim_indices = std.ArrayList(u32).init(alloc),
+            .nodes = std.array_list.Managed(BVHNode).init(alloc),
+            .prim_indices = std.array_list.Managed(u32).init(alloc),
         };
     }
     pub fn deinit(self: *BLASBuilder) void {
@@ -141,13 +141,13 @@ pub const BLASBuilder = struct {
 pub const TLASBuilder = struct {
     const Self = @This();
 
-    nodes: std.ArrayList(BVHNode),
-    prim_indices: std.ArrayList(u32),
+    nodes: std.array_list.Managed(BVHNode),
+    prim_indices: std.array_list.Managed(u32),
 
     pub fn init(alloc: std.mem.Allocator) Self {
         return Self{
-            .nodes = std.ArrayList(BVHNode).init(alloc),
-            .prim_indices = std.ArrayList(u32).init(alloc),
+            .nodes = std.array_list.Managed(BVHNode).init(alloc),
+            .prim_indices = std.array_list.Managed(u32).init(alloc),
         };
     }
     pub fn deinit(self: *TLASBuilder) void {

@@ -49,8 +49,12 @@ pub const Simulator = struct {
 };
 
 fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
+    var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
     const sim_dt = 1.0 / frame_rate;
-    var last = try std.time.Instant.now();
+    var last = std.Io.Clock.awake.now(io);
 
     const wd = shared.world_dev;
     // rc.model_to_world(
@@ -60,11 +64,11 @@ fn run_sim(shared: *SimSharedState, frame_rate: f32) !void {
     //         try wd.meshes.view(1, .{shared.world.mesh_atlas.meshes.items.len}),
     // );
     while (shared.running.load(.acquire)) {
-        const now = try std.time.Instant.now();
-        const since_f32 = @as(f32, @floatFromInt(now.since(last)));
+        const now = std.Io.Clock.awake.now(io);
+        const since_f32 = @as(f32, @floatFromInt(last.durationTo(now).nanoseconds));
         const sim_dt_ns = sim_dt * @as(f32, @floatFromInt(std.time.ns_per_s));
         if (since_f32 < sim_dt_ns) {
-            std.time.sleep(1_000_000); // 1ms to avoid busy wait
+            try io.sleep(.{ .nanoseconds = 1_000_000 }, .awake); // 1ms to avoid busy wait
             continue;
         }
         last = now;
