@@ -13,7 +13,7 @@ Spheres:
 
 ![spheres render](https://github.com/chrarvi/zray/blob/main/assets/render.png?raw=true)
 
-Teapot: (No BVH yet so super inefficient with the number of tris)
+Teapot (TLAS+BLAS)
 
 ![teapot render](https://github.com/chrarvi/zray/blob/main/assets/teapot.png?raw=true)
 
