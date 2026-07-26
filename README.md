@@ -4,8 +4,9 @@ Implementing a path tracer in CUDA using the C CUDA Runtime API and glueing it t
 
 Requirements:
 - Raylib 5.0 in `external/raylib-5.5_linux_amd64/`
+- Microui 2.02 in `external/microui/`
 - stb_image_write in `external/stb_image_write.h`
-- CUDA 13.0 (only tested this one)
+- CUDA 13.3 (only tested this one)
 
 ## Current progress:
 Spheres:
