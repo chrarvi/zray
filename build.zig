@@ -28,6 +28,22 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const raylib_mod = raylib_translate.createModule();
+    raylib_mod.addLibraryPath(b.path("external/raylib-5.5_linux_amd64/lib/"));
+    raylib_mod.linkSystemLibrary("raylib", .{});
+
+    const mui_translate = b.addTranslateC(.{
+        .root_source_file = b.path("external/microui/src/microui.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const mui_mod = mui_translate.createModule();
+    mui_mod.addCSourceFile(.{
+        .file = b.path("external/microui/src/microui.c"),
+        .flags = &[_][]const u8 {
+            "-std=c99",
+            "-fno-sanitize=undefined",
+        }
+    });
 
     const exe = b.addExecutable(.{
         .name = "main",
@@ -36,9 +52,8 @@ pub fn build(b: *std.Build) void {
         ),
     });
 
-    raylib_mod.addLibraryPath(b.path("external/raylib-5.5_linux_amd64/lib/"));
-    raylib_mod.linkSystemLibrary("raylib", .{});
     exe.root_module.addImport("raylib", raylib_mod);
+    exe.root_module.addImport("microui", mui_mod);
     exe.root_module.link_libcpp = true;
     link_cuda(b, exe);
 

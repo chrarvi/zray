@@ -2,6 +2,8 @@ const std = @import("std");
 const stbiw = @import("stb_image_write");
 const rl = @import("raylib");
 const al = @import("core/linalg.zig");
+const mu = @import("microui");
+const gui = @import("gui.zig");
 
 const cu = @import("gpu/cuda.zig");
 const core = @import("core/core.zig");
@@ -23,35 +25,10 @@ const NUM_SPHERES = 4;
 const RAY_MAX_DEPTH = 8;
 const SAMPLES_PER_PIXEL = 24;
 const BLAS_MAX_DEPTH = 24;
-const TLAS_MAX_DEPTH = 20;
+const TLAS_MAX_DEPTH = 4;
 
 const PREVIEW_RAY_MAX_DEPTH = 4;
 const PREVIEW_SAMPLES_PER_PIXEL = 2;
-
-pub fn setup_bvh_scene(
-    world: *core.World,
-    bvh: *const core.BLASBuilder,
-) !void {
-    const mat_wire_id = try world.register_material(.{
-        .kind = rc.MaterialKind.Lambertian,
-        .albedo = .{ .x = 0.8, .y = 0.8, .z = 0.8 },
-    });
-
-    for (bvh.nodes.items) |node| {
-        if (node.depth == 10) {
-            var mesh = try world.mesh_atlas.parse_mesh_from_file("assets/meshes/cube.txt");
-
-            const center = node.box.center();
-            const extent = node.box.extent();
-
-            _ = al.mat4_scale(&mesh.model, extent.divc(2.0));
-            _ = al.mat4_translate(&mesh.model, center);
-            mesh.inv_model = al.mat4_inverse(mesh.model).?;
-
-            mesh.material_idx = mat_wire_id;
-        }
-    }
-}
 
 pub fn setup_teapot_scene(
     world: *core.World,
@@ -240,9 +217,10 @@ fn draw_wire_box(proj: al.Mat4, world_to_cam: al.Mat4, w: f32, h: f32, model: al
 
 pub fn main() !void {
     var gpa = std.heap.page_allocator;
+    var ui = gui.Gui.init();
 
     const aspect_ratio = 16.0 / 9.0;
-    const image_width: u32 = 960;
+    const image_width: u32 = 1280;
     const image_height: u32 = @intFromFloat(@max(@divFloor(@as(f32, @floatFromInt(image_width)), aspect_ratio), 1));
 
     // double-buffering
@@ -330,10 +308,12 @@ pub fn main() !void {
     try simulator.start();
 
     rl.SetTargetFPS(RENDERING_FRAMERATE);
-    rl.DisableCursor();
 
     // Debug overlay state.
-    var draw_aabb = false;
+    var ui_enabled = true;
+    rl.EnableCursor();
+    var draw_aabb: c_int = 0;
+
     var blas_draw_depth: u32 = 6;
     var sim_fps: f64 = 0;
     var last_sim_frames: usize = 0;
@@ -346,19 +326,27 @@ pub fn main() !void {
         rl.UpdateTexture(texture, buf.ptr);
 
         if (!shared.cam.temporal_averaging) {
-            const mouseDelta = rl.GetMouseDelta();
-            camera.yaw += mouseDelta.x * camera.mouse_sensitivity;
-            camera.pitch -= mouseDelta.y * camera.mouse_sensitivity;
-            camera.update();
-
-            if (rl.IsKeyDown(rl.KEY_W)) camera.move(.Forward);
-            if (rl.IsKeyDown(rl.KEY_S)) camera.move(.Back);
-            if (rl.IsKeyDown(rl.KEY_A)) camera.move(.Left);
-            if (rl.IsKeyDown(rl.KEY_D)) camera.move(.Right);
+            if (!ui_enabled) {
+                const mouseDelta = rl.GetMouseDelta();
+                camera.yaw += mouseDelta.x * camera.mouse_sensitivity;
+                camera.pitch -= mouseDelta.y * camera.mouse_sensitivity;
+                camera.update();
+                if (rl.IsKeyDown(rl.KEY_W)) camera.move(.Forward);
+                if (rl.IsKeyDown(rl.KEY_S)) camera.move(.Back);
+                if (rl.IsKeyDown(rl.KEY_A)) camera.move(.Left);
+                if (rl.IsKeyDown(rl.KEY_D)) camera.move(.Right);
+            }
         }
 
         // Debug overlay controls.
-        if (rl.IsKeyPressed(rl.KEY_B)) draw_aabb = !draw_aabb;
+        if (rl.IsKeyPressed(rl.KEY_Q)) {
+            ui_enabled = !ui_enabled;
+            if (ui_enabled) {
+                rl.EnableCursor();
+            } else {
+                rl.DisableCursor();
+            }
+        }
         if (rl.IsKeyPressed(rl.KEY_RIGHT_BRACKET) and blas_draw_depth <= BLAS_MAX_DEPTH) blas_draw_depth += 1;
         if (rl.IsKeyPressed(rl.KEY_LEFT_BRACKET) and blas_draw_depth > 0) blas_draw_depth -= 1;
 
@@ -390,7 +378,7 @@ pub fn main() !void {
         rl.ClearBackground(rl.RAYWHITE);
         rl.DrawTexture(texture, 0, 0, rl.WHITE);
 
-        if (draw_aabb) {
+        if (draw_aabb == 1) {
             const fw: f32 = @floatFromInt(image_width);
             const fh: f32 = @floatFromInt(image_height);
             const c2w = camera.camera_to_world();
@@ -413,21 +401,26 @@ pub fn main() !void {
             }
         }
 
-        // Telemetry overlay.
-        const render_fps = rl.GetFPS();
-        const intersections = shared.last_intersections.load(.monotonic);
-        var buf_txt: [160]u8 = undefined;
-        const txt = std.fmt.bufPrintZ(&buf_txt, "render {d} fps | sim {d:.1} fps | tests {d:.2} M", .{
-            render_fps,
-            sim_fps,
-            @as(f64, @floatFromInt(intersections)) / 1.0e6,
-        }) catch unreachable;
-        rl.DrawRectangle(5, 5, 560, 52, rl.Color{ .r = 0, .g = 0, .b = 0, .a = 160 });
-        rl.DrawText(txt.ptr, 12, 10, 20, rl.GREEN);
-        if (draw_aabb) {
-            rl.DrawText("[B] AABBs: ON", 12, 33, 18, rl.RAYWHITE);
-        } else {
-            rl.DrawText("[B] AABBs: OFF", 12, 33, 18, rl.RAYWHITE);
+        if (ui_enabled) {
+            const render_fps = rl.GetFPS();
+            const intersections = shared.last_intersections.load(.monotonic);
+            var buf_txt: [160]u8 = undefined;
+            const txt = std.fmt.bufPrintSentinel(&buf_txt, "render {d} fps | sim {d:.1} fps | tests {d:.2} M", .{
+                render_fps,
+                sim_fps,
+                @as(f64, @floatFromInt(intersections)) / 1.0e6,
+            }, 0) catch unreachable;
+
+            ui.handleInput();
+            mu.mu_begin(&ui.ctx);
+            if (mu.mu_begin_window(&ui.ctx, "Debug", mu.mu_rect(10, 10, 400, 160)) != 0) {
+                mu.mu_layout_row(&ui.ctx, 1, &[_]c_int{-1}, 0);
+                mu.mu_label(&ui.ctx, txt.ptr);
+                _ = mu.mu_checkbox(&ui.ctx, "Draw TLAS and BLAS", &draw_aabb);
+                mu.mu_end_window(&ui.ctx);
+            }
+            mu.mu_end(&ui.ctx);
+            ui.render();
         }
 
         rl.EndDrawing();
@@ -436,3 +429,4 @@ pub fn main() !void {
     shared.running.store(false, .release);
     try simulator.stop();
 }
+
